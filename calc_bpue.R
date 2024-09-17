@@ -60,12 +60,17 @@ species<-unique(THEDATA$Species)
 
 
 
-calc_bpue <- function(ecoregion, ml4, species, min_re_obs = 2,THEDATA=THEDATA) {
-  needle <- data.table(Ecoregion = ecoregion, MetierL4 = ml4, Species = species)
+
+calc_bpue <- function(Ecoregion, ml4, Species, min_re_obs = 2,ices=THEDATA) {
+
+### I am thinking we put a line here tolower all colnames to avoid inter-annual changes
+### and perhaps use amatch to 'find' the right column
+
+  needle <- data.table(ecoregion = Ecoregion, metierL4 = ml4, species = Species)
   #  monitor <- data$monitor[needle, on = .(ecoregion, ml4), nomatch = 0]
  #   bycatch <- data$bycatch[needle, on = .(ecoregion, ml4, species), nomatch = 0]
 #dat <- THEDATA[Ecoregion==ecoregion&MetierL4==ml4&Species==species,]
-dat <- THEDATA[needle, on = .(Ecoregion, MetierL4,Species), nomatch = 0]
+dat <- ices[needle, on = .(ecoregion, metierL4,species), nomatch = 0]
     if (nrow(dat)==0) {
         return(list(bpue = NA, lrw = NA, upr = NA, model = "None",replicates=nrow(dat),
 		 base_model_heterogeneity=NA,
@@ -78,9 +83,9 @@ dat <- THEDATA[needle, on = .(Ecoregion, MetierL4,Species), nomatch = 0]
     
     # cop out when we only have 1 row of data
     if (nrow(dat) == 1) {
-        bpue <- dat$n_ind / dat$DaysAtSea
-        lwr <- bpue -1.96 * sqrt(dat$n_ind/dat$DaysAtSea^2)
-        upr <- bpue +1.96 * sqrt(dat$n_ind/dat$DaysAtSea^2)
+        bpue <- dat$n_ind / dat$daysAtSea
+        lwr <- bpue -1.96 * sqrt(dat$n_ind/dat$daysAtSea^2)
+        upr <- bpue +1.96 * sqrt(dat$n_ind/dat$daysAtSea^2)
         return(list(bpue = bpue, lwr = lwr, upr = upr, model= "only one",replicates=nrow(dat),
 		 base_model_heterogeneity=NA,
 		 bpue.cond.name=NA,
@@ -89,7 +94,7 @@ dat <- THEDATA[needle, on = .(Ecoregion, MetierL4,Species), nomatch = 0]
 		 bpue.cond.upr=NA))
     }
     
-    base_model <- tryCatch(glmmTMB(n_ind ~ 1, offset = log(DaysAtSea), family = nbinom2, data = dat),error=function(e) e$message)
+    base_model <- tryCatch(glmmTMB(n_ind ~ 1, offset = log(daysAtSea), family = nbinom2, data = dat),error=function(e) e$message)
     # If we have less than 5 rows of monitoring data, fit a simple model and we're done.
 
     if (nrow(dat) < 5) {
@@ -97,7 +102,7 @@ dat <- THEDATA[needle, on = .(Ecoregion, MetierL4,Species), nomatch = 0]
         best <- base_model
         # fit rate estimate model? go back to using a different assumption on family
         # use offset as denomitator, so that we can get variance of bpue estimates?
-              heterogeneity_base<-tryCatch((rma.glmm(xi=n_ind,ti=(DaysAtSea),measure="IRLN",data=dat)$QEp.Wld<0.05),error=function(e) e$message)# I^2 (or other mesaure) to select model?# I^2 (or other mesaure) to select model?
+              heterogeneity_base<-tryCatch((rma.glmm(xi=n_ind,ti=(daysAtSea),measure="IRLN",data=dat)$QEp.Wld<0.05),error=function(e) e$message)# I^2 (or other mesaure) to select model?# I^2 (or other mesaure) to select model?
    
         
     } else {
@@ -105,7 +110,7 @@ dat <- THEDATA[needle, on = .(Ecoregion, MetierL4,Species), nomatch = 0]
         # If we have more than 5 rows of monitoring data, fit all possible
         # combinations of the base model and one or more of the terms in the
         # vector below, added to the model as random effects.
-        re <- c("Country", "Year", "MetierLevel5", "VesselLength_group","SamplingProtocol","MonitoringMethod")
+        re <- c("country", "areaCode","year", "metierLevel5", "vesselLength_group","samplingProtocol","monitoringMethod")
 		#re <- c("Country", "Year", "MetierLevel5", "VesselLength_group")
         # but only consider terms where the number of unique values
         # is greater than min_re_obs
@@ -122,7 +127,7 @@ dat <- THEDATA[needle, on = .(Ecoregion, MetierL4,Species), nomatch = 0]
             re <- sprintf("(1|%s)", re[unlist(i)])
             form <- sprintf("n_ind ~ 1 + %s", paste(re, collapse = " + "))
             form <- as.formula(form)
-            tryCatch(glmmTMB(formula = form, offset=log(DaysAtSea), family = nbinom2, data = dat),error=function(e) e$message,warning=function(w) w$message)
+            tryCatch(glmmTMB(formula = form, offset=log(daysAtSea), family = nbinom2, data = dat),error=function(e) e$message,warning=function(w) w$message)
         })
         candidates.converged<-candidates[which(lapply(candidates,class)!="character")]
         scores <- sapply(candidates.converged, AIC) # or something other than AIC?
@@ -132,7 +137,7 @@ dat <- THEDATA[needle, on = .(Ecoregion, MetierL4,Species), nomatch = 0]
         best=base_model}
 		
 		
-         heterogeneity_base<-tryCatch((rma.glmm(xi=n_ind,ti=(DaysAtSea),measure="IRLN",data=dat)$QEp.Wld<0.05),error=function(e) e$message)# I^2 (or other mesaure) to select model?# I^2 (or other mesaure) to select model?
+         heterogeneity_base<-tryCatch((rma.glmm(xi=n_ind,ti=(daysAtSea),measure="IRLN",data=dat)$QEp.Wld<0.05),error=function(e) e$message)# I^2 (or other mesaure) to select model?# I^2 (or other mesaure) to select model?
     
 	}
     
@@ -143,13 +148,13 @@ dat <- THEDATA[needle, on = .(Ecoregion, MetierL4,Species), nomatch = 0]
 	}
 	
 	if(formula(base_model)!=formula(best)) {
-	bpue.re <- as.data.frame(ggpredict(best,terms=c(paste(names(best$frame)[2:(length(names(best$frame))-2)],sep=",")),condition=c(DaysAtSea=1),type="re")) # BPUE for one DaS we can push to total effort prediction instead next
+	bpue.re <- as.data.frame(ggpredict(best,terms=c(paste(names(best$frame)[2:(length(names(best$frame))-2)],sep=",")),condition=c(daysAtSea=1),type="re")) # BPUE for one DaS we can push to total effort prediction instead next
 	#for glmmTMB need to do ggpredict instead
 	
     return(list(bpue = bpue.r$response, 
-         lwr = bpue.r$lower.CL, # bpue.r$asymp.LCL, 
-         upr = bpue.r$upper.CL,# bpue.r$asymp.UCL,
-         model = format(formula(best)),
+         lwr = c(bpue.r$lower.CL,bpue.r$asymp.LCL), 
+         upr = c(bpue.r$upper.CL,bpue.r$asymp.UCL),
+         model = paste(format(formula(best)),collapse=""),
 		 replicates=nrow(dat),
 		 base_model_heterogeneity=heterogeneity_base,
 		 bpue.cond.name=NA,
@@ -159,9 +164,9 @@ dat <- THEDATA[needle, on = .(Ecoregion, MetierL4,Species), nomatch = 0]
 		 
 		 } else {
 		 return(list(bpue = bpue.r$response, 
-         lwr = bpue.r$lower.CL, # bpue.r$asymp.LCL, 
-         upr = bpue.r$upper.CL,# bpue.r$asymp.UCL,
-         model = format(formula(best)),
+         lwr = c(bpue.r$lower.CL,bpue.r$asymp.LCL), 
+         upr = c(bpue.r$upper.CL,bpue.r$asymp.UCL), #trick to grab either depending on model
+         model = paste(format(formula(best)),collapse=""),
 		 replicates=nrow(dat),
 		 base_model_heterogeneity=heterogeneity_base,
 		 bpue.cond.name=NA,
@@ -293,7 +298,8 @@ BPUE.retain$colour[BPUE.retain$replicates<5]<-"yellow"
 BPUE.retain$QC1<-"green"
 BPUE.retain$QC2<-"green"
 BPUE.retain$QC3<-"green"
-
+
+
 
 ### the writing to column of the list element did not work :( we have to refit the 132 models
 
