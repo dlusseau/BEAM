@@ -77,7 +77,7 @@ obs3[species == "stellate sturgeon", species := "acipenser stellatus"]
 ###
 # add in bycatch counts
 obs3$n_ind <- 0
-obs3[bycatch3, on = .(ecoregion, areacode, country, year,
+obs3[bycatch3, on = .(ecoregion, areacode, country, year, quarter,
                       metierl4, metierl5, vessellength_group,
                       samplingprotocol, monitoringmethod, species),
      n_ind := i.n_ind]
