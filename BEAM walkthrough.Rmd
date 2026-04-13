@@ -400,6 +400,7 @@ for (i in 1:nrow(bpue1)) {
     tot1[[i]] <- calc_total(bpue1[i],
                             obs = obs3[taxon_bycatch_monitor_ok==TRUE], 
                             all = all2, 
+                            years = years,
                             verbose = FALSE)
 }
 tot1 <- rbindlist(tot1)
@@ -849,6 +850,7 @@ knitr::include_graphics("results/totalbycatch_elasmobranchs_reliability_check_or
 ```{r, eval=FALSE, echo=FALSE, out.width="90%"}
 knitr::include_graphics("results/totalbycatch_fish_reliability_check_ordered.png")
 ```
+
 
 
 
