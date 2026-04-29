@@ -211,7 +211,7 @@ calc_bpue <- function(needle, cols = colnames(needle), min_re_obs = 2, dat, year
 
 	# In cases where no heterogeneity was detected, over-write best model by base model
 
-  if (isFALSE(base_model_heterogeneity)) {
+  if (isFALSE(ret$base_model_heterogeneity)) {
     ret[, model := paste(format(formula(base_model)), collapse = "")]
   } else {}
 									
@@ -261,6 +261,7 @@ calc_bpue <- function(needle, cols = colnames(needle), min_re_obs = 2, dat, year
     return(ret)
     
 }
+
 
 
 
