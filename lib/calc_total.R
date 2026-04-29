@@ -48,9 +48,18 @@ calc_total <- function(bpue, cols = c("ecoregion", "metierl4", "species"), obs, 
     ret[, c("tot_mean", "tot_lwr", "tot_upr", "message", "fishing_effort") :=
             list(NA_real_, NA_real_, NA_real_, "OK", NA_real_)]
 
-    if (is.na(bpue$model) | bpue$model == "none" | bpue$model == "only one") {
+    if (is.na(bpue$model) | bpue$model == "only one") {
         return(ret)
     }
+    
+    
+    ##change post WKBBEAM to account for the zero that pass the threshold resulting in a BPUE = 0 estimate. 
+    ## note here 
+    if (bpue$model == "none") {
+      ret$tot_mean<-bpue$bpue   # 0 if the zero passed else NA
+      return(ret)
+    }
+    
 
     form <- as.formula(bpue$model)
     re <- lme4::findbars(form) # random effects part of model formulation (if any)
