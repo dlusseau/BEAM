@@ -380,6 +380,20 @@ bpue2 <- annotate_bpue(bpue1, cols = c("ecoregion", "metierl4"))
 fwrite(bpue2, file = "data/bpue2.csv", sep = ";",na="NA")
 ```
 
+##############################
+### can we qualify monitored zero bycatch events?
+##############################
+
+This step was introduced during the benchmark in Dec 2025 (see WKBBEAM report). Here we attempt to estimate whether we are comfortable with instances when we have no bycatch events monitored. That is, we aim to estimate whether the probability that a bycatch would have occurred but was not monitored is low. We tested varying approaches during the benchmark to achieve this. Here we assume that we would like to be sure that we are able to detect very rare bycatch (BPUE = 0.001) and that we do that with virtual certainty (probability of 0.01 that we observe no bycatch given the monitoring effort spent and the true BPUE is 0.001).
+If a case meets this requirement then BPUE is estimated to by zero with a lower confidence interval of zero and an upper confidence interval estimated using a parametric approach (adjusted Wald method) and the bycatch estimate is zero.
+
+
+```{r zero assessments, eval=FALSE}
+bpue1 <- fread("data/bpue1.csv")
+bpue2 <- fread("data/bpue2.csv")
+zero_assessments()
+
+```
 
 ###############################################################################################################
 ## Bycatch estimation
@@ -533,7 +547,7 @@ source("lib/add_qc123.R")
 total_bycatch <- add_qc123(tot = tot1, obs = obs3, all = all2, cols = c("ecoregion", "year", "country", "metierl4", "metierl5"), year = (year(Sys.Date())-1))
 fwrite(total_bycatch, "data/final_beam_table.csv",na="NA")
 
-tjor
+
 ```
 
 
