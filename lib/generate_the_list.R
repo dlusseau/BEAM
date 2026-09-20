@@ -29,25 +29,29 @@ mediterranean <- fread("data/Med_Annex_1_WGBYC_2025.csv",
                        col.names = c("aphiaid", "species", "ecoregion", "taxon"), 
                        encoding = "Latin-1")
 
-annex01_species<-fread("data/datacall2026.csv",
-                    col.names = c("aphiaid", "species","name", "ecoregion", "taxon"), 
+annex01_species<-fread("data/ICES_Annex_1_WGBYC_2024.csv",
+                    col.names = c("aphiaid", "species", "ecoregion", "taxon"), 
                     encoding = "Latin-1")
+
+annex01_2026<-fread("data/datacall2026.csv",
+                       col.names = c("aphiaid", "species", "ecoregion", "taxon"), 
+                       encoding = "Latin-1")
 
 med_ecoregion<-unique(mediterranean$ecoregion)
 "Mediterranean and Black Sea"
 
 
-ecoreg_species <- bind_rows(
-  annex01_species %>%
+annex01_2026_ex <- bind_rows(
+  annex01_2026 %>%
     filter(ecoregion != "Mediterranean and Black Sea"),
   
-  annex01_species %>%
+  annex01_2026 %>%
     filter(ecoregion == "Mediterranean and Black Sea") %>%
     select(-ecoregion) %>%
     crossing(ecoregion = med_ecoregion)
 )
 
-#ecoreg_species = rbindlist(list(annex01_species, mediterranean))
+ecoreg_species = rbindlist(list(annex01_species, mediterranean,annex01_2026_ex))
 clean_chars(ecoreg_species) # fix misc. character issues
 ecoreg_species[, aphiaid := unique(na.omit(aphiaid))[1], species] # fill in NAs
 ecoreg_species <- unique(ecoreg_species) # remove duplicates
