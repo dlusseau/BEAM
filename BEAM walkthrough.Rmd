@@ -109,6 +109,8 @@ library(scales)
 library(countrycode)
 library(stringi)
 library(stringr)
+library(dplyr)
+library(tidyr)
 
 ```
 
@@ -127,8 +129,8 @@ There you will generate a token which you need to copy and paste in the object b
 do note the username: it should be the email (eg louis.attack@dartmouth.edu) you used to make the access request  
 
 ```{r load credentials,  eval=FALSE}
-ices_username <- ""
-token<-""
+ices_username <- readLines("username.txt")
+token<-readLines("token.txt")
 
 ```
 
@@ -147,7 +149,7 @@ then you need to decide how many cores you will use for the parallelisation work
 
 ```{r create cluster,  eval=FALSE}
 detectCores()
-ncores<-16 #change this to what you want
+ncores<-6 #change this to what you want
 
 cl <- makeCluster(ncores)
 registerDoSNOW(cl)
@@ -161,6 +163,9 @@ we download the data from the ICES server using a custom function which allows t
 this creates three objects in the workspace (all1 which is D1, obs1 which is D2, and bycatch1 which is D3) as well as save them as csv files in the data folder with the same names  
 
 ```{r get data, eval=FALSE}
+all1<-fread("data/all1.csv")
+obs1<-fread("data/obs1.csv")
+bycatch1 <-fread("data/bycatch1.csv")
 all1 <- beam_get_raw_data("data/all1.csv", years = years, force_download = FALSE)
 obs1 <- beam_get_raw_data("data/obs1.csv", years = years, force_download = FALSE)
 bycatch1 <- beam_get_raw_data("data/bycatch1.csv", years = years, force_download = FALSE)
