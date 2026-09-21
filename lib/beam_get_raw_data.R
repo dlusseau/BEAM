@@ -51,7 +51,11 @@ beam_get_raw_data <- function(filename, years, force_download = FALSE, verbose =
     
     t_start <- Sys.time()
     
+    if (packageVersion("icesConnect")<"1.2") {
     resp <- icesConnect::ices_get_jwt(url, username = ices_username, jwt = ices_token, quiet = TRUE)
+    } else {
+    resp <- icesConnect::ices_get_jwt(url, jwt = ices_token, quiet = TRUE)  
+    }
     dat <- jsonlite::fromJSON(httr::content(resp, as = "text"))
     fwrite(dat, file = filename, sep = ";")
     
