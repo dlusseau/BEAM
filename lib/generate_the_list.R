@@ -38,7 +38,7 @@ annex01_2026<-fread("data/datacall2026.csv",
                        encoding = "Latin-1")
 
 med_ecoregion<-unique(mediterranean$ecoregion)
-"Mediterranean and Black Sea"
+#"Mediterranean and Black Sea"
 
 
 annex01_2026_ex <- bind_rows(
