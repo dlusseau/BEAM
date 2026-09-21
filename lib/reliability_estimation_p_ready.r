@@ -159,7 +159,7 @@ calc_rmse <- function(full_data, bpue) {
         sum(log_diff^2, na.rm = TRUE) / n
     })
     
-    sqrt(sum(diffs, na.rm=TRUE)/(nrow(data_subset)))
+    sqrt(sum(diffs, na.rm=TRUE)/(nrow(data_subset)-1))
 }
 
 

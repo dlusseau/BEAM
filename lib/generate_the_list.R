@@ -165,7 +165,7 @@ obs3[species %in% c("apristurus", "centroselachus crepidater", "deania calceus",
 
 #General rule
 obs3[,
-    taxon_bycatch_monitor_ok := (taxa_monitored %in% c("all","elasmobranchs~seabirds~mammals", "protectedspecies")) | (taxa_monitored == taxon)
+    taxon_bycatch_monitor_ok := (taxa_monitored %in% c("all","elasmobranchs~seabirds~mammals","cetaceans~seabirds~elasmobranchs~pinnipeds", "protectedspecies")) | (taxa_monitored == taxon)
 ]
 
 #Adding exceptions to fix case by case issues
@@ -175,6 +175,9 @@ obs3[taxon == "elasmobranchs" & taxa_monitored == "fish",taxon_bycatch_monitor_o
 
 #Taxon monitored is not okay if teleost fish were reported under elasmobranchs~seabirds~mammals
 obs3[taxon == "fish" & taxa_monitored == "elasmobranchs~seabirds~mammals", taxon_bycatch_monitor_ok := FALSE] 
+
+#Taxon monitored is not okay if teleost fish were reported under cetaceans~seabirds~elasmobranchs~pinnipeds
+obs3[taxon == "fish" & taxa_monitored == "cetaceans~seabirds~elasmobranchs~pinnipeds", taxon_bycatch_monitor_ok := FALSE] #Addition of new 2026 data
 
  #We consider EM data only for mammals and seabirds, unless it's UK data, since we know they monitor all ETP species 
 obs3[monitoringmethod == "em" & country != "gbr" & !(taxon %in% c("mammals", "seabirds")),taxon_bycatch_monitor_ok := FALSE]
