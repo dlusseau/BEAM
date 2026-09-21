@@ -130,7 +130,7 @@ do note the username: it should be the email (eg louis.attack@dartmouth.edu) you
 
 ```{r load credentials,  eval=FALSE}
 ices_username <- readLines("username.txt")
-token<-readLines("token.txt")
+ices_token<-readLines("token.txt")
 
 ```
 
@@ -142,7 +142,7 @@ years <- seq(2017, year(Sys.Date())-1)
 for the purpose of the benchmark we restrict it to:
 
 ```{r define years benchmark,  eval=FALSE}
-years<-seq(2017,2023)
+#years<-seq(2017,2023)
 ```
 
 then you need to decide how many cores you will use for the parallelisation work taking place in this script you can first assess how many cores you have available and make an informed decision about how many you would like to dedicate to this task and we then initialise the cluster:
@@ -163,9 +163,6 @@ we download the data from the ICES server using a custom function which allows t
 this creates three objects in the workspace (all1 which is D1, obs1 which is D2, and bycatch1 which is D3) as well as save them as csv files in the data folder with the same names  
 
 ```{r get data, eval=FALSE}
-all1<-fread("data/all1.csv")
-obs1<-fread("data/obs1.csv")
-bycatch1 <-fread("data/bycatch1.csv")
 all1 <- beam_get_raw_data("data/all1.csv", years = years, force_download = FALSE)
 obs1 <- beam_get_raw_data("data/obs1.csv", years = years, force_download = FALSE)
 bycatch1 <- beam_get_raw_data("data/bycatch1.csv", years = years, force_download = FALSE)
