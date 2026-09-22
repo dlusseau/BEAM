@@ -136,7 +136,7 @@ ices_token<-readLines("token.txt")
 
 we then set the range of years considered in the assessment. usually it is set as:
 ```{r define years,  eval=FALSE}
-years <<- seq(2017, year(Sys.Date())-1)
+years <- seq(2017, year(Sys.Date())-1)
 ```
 
 for the purpose of the benchmark we restrict it to:
@@ -149,7 +149,7 @@ then you need to decide how many cores you will use for the parallelisation work
 
 ```{r create cluster,  eval=FALSE}
 detectCores()
-ncores<-10 #change this to what you want
+ncores<-12 #change this to what you want
 
 cl <- makeCluster(ncores)
 registerDoSNOW(cl)
@@ -262,7 +262,6 @@ eco_m4_spec <- unique(obs3[, .(ecoregion, metierl4, species)])
 bpue1 <- calc_bpue(eco_m4_spec,
                    cols = c("ecoregion", "metierl4", "species"),
                    dat = obs3[taxon_bycatch_monitor_ok==TRUE],
-                   years=years,
                   include.weights = TRUE)
 fwrite(bpue1, file = "data/bpue1.csv", sep = ";",na="NA")
 
@@ -296,6 +295,102 @@ fwrite(bpue1_area, file = "data/bpue1_area.csv", sep = ";",na="NA")
 ################################################################################
 bpue2_area <- annotate_bpue(bpue1_area, cols = c("ecoregion", "areacode", "metierl4"))
 fwrite(bpue2_area, file = "data/bpue2_area.csv", sep = ";",na="NA")
+
+```
+
+
+##### 2026 Common Dolphin Case study #####
+
+```{r}
+obs3_area_CD <- subset(obs3,(ecoregion=="bay of biscay and the iberian coast") &
+                       (species=="delphinus delphis"))
+
+area_CD_m4_spec <- unique(obs3_area_CD[, .(ecoregion, areacode, metierl4, species)])
+
+bpue1_area_CD <- calc_bpue(needle = area_CD_m4_spec, 
+                        cols = c("ecoregion", "areacode", "metierl4", "species"),
+                        include.weights = T,
+                        dat = obs3_area_CD[taxon_bycatch_monitor_ok==TRUE])
+
+fwrite(bpue1_area_CD, file = "data/bpue1_area_CD.csv", sep = ";",na="NA")
+
+bpue2_area_CD <- annotate_bpue(bpue1_area_CD, cols = c("ecoregion", "areacode", "metierl4"))
+fwrite(bpue2_area_CD, file = "data/bpue2_area_CD.csv", sep = ";",na="NA")
+```
+
+
+#Total per year and per quarter CD 
+
+```{r}
+
+#Manually creating a weights value here for compatibility with the CIBBRiNA code
+
+obs3_area_CD[, weights := ifelse(year >= (max(years)-4),1,0.5)]
+
+# Calculate totals for CD
+years # Already loaded at the beggining of the walkthrough
+quarters <- 1:4
+
+comb <- expand.grid(quarter = quarters, year = years)
+
+# modify colname for fishing effort
+all_CD <- fread("data/fishing_all_years.csv")
+
+all2_CD <- all_CD
+
+colnames(all2_CD)[13] <- "daysatsea"
+
+tot_CD <- NULL
+for(i in 1:nrow(comb)){
+  print(i)
+  output <- calc_total_CD(bpue = bpue2_area_CD, 
+                          analysis_resolution = c("ecoregion", "areacode", "metierl4", "species"),
+                          dat = obs3_area_CD, # the same that was given to calc_bpue
+                          fishing = all2_CD, 
+                          #verbose = T,
+                          #include.weights = T,
+                          response = "n_ind",
+                          effort_term = "daysatsea", 
+                          #weights_values = "weights",
+                          filter = list(year = comb$year[i], 
+                                        quarter = comb$quarter[i]))
+  tot_CD <- rbind(tot_CD, output)
+}
+
+fwrite(tot_CD, "results/tot_CD.csv")
+
+```
+
+
+#### 2026 Baltic work ####
+
+
+```{r areabase,eval=FALSE}
+################################################################################
+# For cases where ecoregion-level estimation and prediction is considered 
+# inappropriate, we can go to the areacode level.
+
+#### we want you to think about it for this step, so we kept it manual
+
+obs3_area <- subset(obs3,(ecoregion=="baltic sea") &
+                       (taxon=="mammals"))
+
+obs3_area <- subset(obs3,(ecoregion=="baltic sea") &
+                       (species =="pusa hispida" | species =="phocoena phocoena"))
+
+
+area_m4_spec <- unique(obs3_area[, .(ecoregion, areacode, metierl4, species)])
+
+bpue1_area <- calc_bpue(needle = area_m4_spec, 
+                        cols = c("ecoregion", "areacode", "metierl4", "species"),
+                        dat = obs3_area[taxon_bycatch_monitor_ok==TRUE])
+
+#fwrite(bpue1_area, file = "data/bpue1_area.csv", sep = ";",na="NA")
+
+################################################################################
+bpue2_area <- annotate_bpue(bpue1_area, cols = c("ecoregion", "areacode", "metierl4"))
+
+#fwrite(bpue2_area, file = "data/bpue2_area.csv", sep = ";",na="NA")
 
 ```
 
@@ -409,8 +504,8 @@ If a case meets this requirement then BPUE is estimated to by zero with a lower 
 
 
 ```{r zero assessments, eval=FALSE}
-#bpue1 <- fread("data/bpue1.csv")
-#bpue2 <- fread("data/bpue2.csv")
+bpue1 <- fread("data/bpue1.csv")
+bpue2 <- fread("data/bpue2.csv")
 zero_assessments()
 
 ```
@@ -422,7 +517,7 @@ zero_assessments()
 we then attempt to predict the total bycatch that would result from the observed fishing effort that year given the estimated BPUE(s)  
 
 ```{r, eval=FALSE}
-#bpue1 <- fread("data/bpue1.csv")
+bpue1 <- fread("data/bpue1.csv")
 ```
 
 
@@ -446,17 +541,17 @@ fwrite(tot1, file = "data/tot1.csv", sep = ";",na="NA")
 ```{r sandbox, eval=FALSE}
 #######
 ##### sandbox
-# 
-# data<-obs3[obs3$species == "alosa fallax",]
-# 
-# data$fishdays<-rpois(nrow(data),1000)
-# glm0
-# 
-# p <- ggpredict(model = glm0,terms=data.frame(country="swe"&year="2023"),
-#                            condition = c(logDAS = log(data$fishdays),
-#                            type = "random",
-#                            interval = "confidence",
-#                            verbose = verbose)
+
+data<-obs3[obs3$species == "alosa fallax",]
+
+data$fishdays<-rpois(nrow(data),1000)
+glm0
+
+p <- ggpredict(model = glm0,terms=data.frame(country="swe"&year="2023"),
+                           condition = c(logDAS = log(data$fishdays),
+                           type = "random",
+                           interval = "confidence",
+                           verbose = verbose)
 
 ###########
 ##########
