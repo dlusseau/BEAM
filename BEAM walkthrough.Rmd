@@ -136,7 +136,7 @@ ices_token<-readLines("token.txt")
 
 we then set the range of years considered in the assessment. usually it is set as:
 ```{r define years,  eval=FALSE}
-years <- seq(2017, year(Sys.Date())-1)
+years <<- seq(2017, year(Sys.Date())-1)
 ```
 
 for the purpose of the benchmark we restrict it to:
@@ -149,7 +149,7 @@ then you need to decide how many cores you will use for the parallelisation work
 
 ```{r create cluster,  eval=FALSE}
 detectCores()
-ncores<-6 #change this to what you want
+ncores<-10 #change this to what you want
 
 cl <- makeCluster(ncores)
 registerDoSNOW(cl)
@@ -245,6 +245,7 @@ eco_m4_spec <- unique(obs3[, .(ecoregion, metierl4, species)])
 bpue1 <- calc_bpue(eco_m4_spec,
                    cols = c("ecoregion", "metierl4", "species"),
                    dat = obs3[taxon_bycatch_monitor_ok==TRUE],
+                   years=years,
                   include.weights = TRUE)
 fwrite(bpue1, file = "data/bpue1.csv", sep = ";",na="NA")
 
