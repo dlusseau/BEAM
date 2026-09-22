@@ -327,6 +327,37 @@ fwrite(bpue2_area_CD, file = "data/bpue2_area_CD.csv", sep = ";",na="NA")
 
 obs3_area_CD[, weights := ifelse(year >= (max(years)-4),1,0.5)]
 
+# Calculate totals for CD
+years # Already loaded at the beggining of the walkthrough
+quarters <- 1:4
+
+comb <- expand.grid(quarter = quarters, year = years)
+
+# modify colname for fishing effort
+all_CD <- fread("data/fishing_all_years.csv")
+
+all2_CD <- all_CD
+
+colnames(all2_CD)[13] <- "daysatsea"
+
+tot_CD <- NULL
+for(i in 1:nrow(comb)){
+  print(i)
+  output <- calc_total_CD(bpue = bpue2_area_CD, 
+                          analysis_resolution = c("ecoregion", "areacode", "metierl4", "species"),
+                          dat = obs3_area_CD, # the same that was given to calc_bpue
+                          fishing = all2_CD, 
+                          #verbose = T,
+                          #include.weights = T,
+                          response = "n_ind",
+                          effort_term = "daysatsea", 
+                          #weights_values = "weights",
+                          filter = list(year = comb$year[i], 
+                                        quarter = comb$quarter[i]))
+  tot_CD <- rbind(tot_CD, output)
+}
+
+fwrite(tot_CD, "results/tot_CD.csv")
 
 ```
 
