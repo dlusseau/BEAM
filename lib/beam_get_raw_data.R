@@ -38,7 +38,7 @@ beam_get_raw_data <- function(filename, years, force_download = FALSE, verbose =
     # depending on which data we're getting 
     if (api %in% 1:3) {
         url <- sprintf(ices_api_urls[[api]], paste0(years, collapse = ","))
-        info <- sprintf(" (years=%s-%s)", min(years), max(years))
+        info <- sprintf(" (years=%s-%s)", min(years), max(years)+1)
     } else if (api == 4) {
         url <- sprintf(ices_api_urls[[api]], max(years)+1)
         info <- sprintf(" (year=%d)", max(years)+1)

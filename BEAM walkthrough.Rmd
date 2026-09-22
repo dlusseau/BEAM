@@ -392,8 +392,8 @@ If a case meets this requirement then BPUE is estimated to by zero with a lower 
 
 
 ```{r zero assessments, eval=FALSE}
-bpue1 <- fread("data/bpue1.csv")
-bpue2 <- fread("data/bpue2.csv")
+#bpue1 <- fread("data/bpue1.csv")
+#bpue2 <- fread("data/bpue2.csv")
 zero_assessments()
 
 ```
@@ -405,7 +405,7 @@ zero_assessments()
 we then attempt to predict the total bycatch that would result from the observed fishing effort that year given the estimated BPUE(s)  
 
 ```{r, eval=FALSE}
-bpue1 <- fread("data/bpue1.csv")
+#bpue1 <- fread("data/bpue1.csv")
 ```
 
 
@@ -429,17 +429,17 @@ fwrite(tot1, file = "data/tot1.csv", sep = ";",na="NA")
 ```{r sandbox, eval=FALSE}
 #######
 ##### sandbox
-
-data<-obs3[obs3$species == "alosa fallax",]
-
-data$fishdays<-rpois(nrow(data),1000)
-glm0
-
-p <- ggpredict(model = glm0,terms=data.frame(country="swe"&year="2023"),
-                           condition = c(logDAS = log(data$fishdays),
-                           type = "random",
-                           interval = "confidence",
-                           verbose = verbose)
+# 
+# data<-obs3[obs3$species == "alosa fallax",]
+# 
+# data$fishdays<-rpois(nrow(data),1000)
+# glm0
+# 
+# p <- ggpredict(model = glm0,terms=data.frame(country="swe"&year="2023"),
+#                            condition = c(logDAS = log(data$fishdays),
+#                            type = "random",
+#                            interval = "confidence",
+#                            verbose = verbose)
 
 ###########
 ##########
