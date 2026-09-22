@@ -81,8 +81,8 @@ calc_total_CD <- function(bpue, analysis_resolution, dat, fishing, verbose = TRU
   #dat[, weights := ifelse(year >= (max(years)-4),1,0.5)] OLD VERSION, KEEP AS AN EXAMPLE
 
     ret <- bpue[, c(analysis_resolution, "model"), with = FALSE]
-    ret[, c("tot_mean", "tot_lwr", "tot_upr", "message", "fishing_effort") :=
-            list(NA_real_, NA_real_, NA_real_, "OK", NA_real_)]
+    ret[, c("year", "quarter", "tot_mean", "tot_lwr", "tot_upr", "message", "fishing_effort") :=
+            list(filter[["year"]], filter[["quarter"]],NA_real_, NA_real_, NA_real_, "OK", NA_real_)]
 
     if (is.na(bpue$model) || (bpue$model == "none" && is.na(bpue$bpue)) || bpue$model == "only one") {
     return(ret)
