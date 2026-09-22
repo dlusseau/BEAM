@@ -317,7 +317,37 @@ bpue2_area_CD <- annotate_bpue(bpue1_area_CD, cols = c("ecoregion", "areacode", 
 fwrite(bpue2_area_CD, file = "data/bpue2_area_CD.csv", sep = ";",na="NA")
 ```
 
-#
+#### 2026 Baltic work ####
+
+
+```{r areabase,eval=FALSE}
+################################################################################
+# For cases where ecoregion-level estimation and prediction is considered 
+# inappropriate, we can go to the areacode level.
+
+#### we want you to think about it for this step, so we kept it manual
+
+obs3_area <- subset(obs3,(ecoregion=="baltic sea") &
+                       (taxon=="mammals"))
+
+obs3_area <- subset(obs3,(ecoregion=="baltic sea") &
+                       (species =="pusa hispida" | species =="phocoena phocoena"))
+
+
+area_m4_spec <- unique(obs3_area[, .(ecoregion, areacode, metierl4, species)])
+
+bpue1_area <- calc_bpue(needle = area_m4_spec, 
+                        cols = c("ecoregion", "areacode", "metierl4", "species"),
+                        dat = obs3_area[taxon_bycatch_monitor_ok==TRUE])
+
+#fwrite(bpue1_area, file = "data/bpue1_area.csv", sep = ";",na="NA")
+
+################################################################################
+bpue2_area <- annotate_bpue(bpue1_area, cols = c("ecoregion", "areacode", "metierl4"))
+
+#fwrite(bpue2_area, file = "data/bpue2_area.csv", sep = ";",na="NA")
+
+```
 
 
 metier L5 level analysis
