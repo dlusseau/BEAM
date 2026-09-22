@@ -604,7 +604,12 @@ note further work takes place in WGBYC ToR E to synthesis information about cont
 First we try to assess whether we have a bycatch estimate for all metiers at level 4 to which the species is sensitive for bycatch:
 
 ```{r complete bycatch, eval=FALSE}
-all.metier<-fread("data/ecoregion_metier_sps_risk_bycatch_2023.csv")
+
+##here we create the risk table dynamically, accounting for the species list update and new monitoring
+
+source("lib/risktable_making.R")
+all.metier<-risktable_making(bycatch1,ecoreg_species)
+#all.metier<-fread("data/ecoregion_metier_sps_risk_bycatch_2023.csv")
 
 #all.metier contains for each ecoregion x species a list of all metiers in which the species has been recorded as bycaught in any ecoregions and for which the metiers have fishing effort in the ecoregion of interest
 
