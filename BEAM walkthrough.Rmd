@@ -629,7 +629,7 @@ fwrite(total_bycatch,"results/cases_with_total_bycatch.csv",na="NA")
 we then have a function to produce figures and tables of total estimates all saved in the results section:
 
 ```{r visualise summary, eval=FALSE}
-endyear<-2023 #this is altered for the benchmark data
+endyear<-2025 #this is altered for the benchmark data
 
 #summaryyear<-aggregate(cbind(n_ind,daysatsea)~ecoregion+metierl4+species,sum,data=obs3[taxon_bycatch_monitor_ok==TRUE&year==(year(Sys.Date())-1)] )
 summaryyear<-aggregate(cbind(n_ind,daysatsea)~ecoregion+metierl4+species,sum,data=obs3[taxon_bycatch_monitor_ok==TRUE&year==endyear] )
@@ -640,12 +640,15 @@ names(summaryall)[4:5]<-c("n_ind_all","daysatsea_all")
 #produce main table to print and bycatch estimate figures by taxon
 source("lib/produce_table_and_overall_figures.R")
 
+#postestimate_qa
+
 ```
 
 we also produce legacy plots about rates of achieved estimations, those are plots which were used in previous reports but replaced by better visualisation produced in the function "Data_viz.R" in 2025
 
+WE NO LONGER DO THAT
 ```{r visualise legacy, eval=FALSE}
-source("lib/legacy_achievement_plots.R")
+#source("lib/legacy_achievement_plots.R")
 
 ```
 
