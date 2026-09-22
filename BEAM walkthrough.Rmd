@@ -168,6 +168,20 @@ obs1 <- beam_get_raw_data("data/obs1.csv", years = years, force_download = FALSE
 bycatch1 <- beam_get_raw_data("data/bycatch1.csv", years = years, force_download = FALSE)
 ```
 
+```{r 2025GBFix, eval=FALSE}
+
+# Copy VL0010 rows from 2024
+vl0010_2025 <- subset(
+  all1,
+  vesselLengthRange == "VL0010" & year == 2024
+)
+# Change year
+vl0010_2025$year <- 2025
+# Append to original data
+all1 <- rbind(all1, vl0010_2025)
+
+```
+
 ###############################################################################################################
 ## Data cleaning and preparation
 ###############################################################################################################
