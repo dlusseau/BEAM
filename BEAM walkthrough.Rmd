@@ -317,6 +317,19 @@ bpue2_area_CD <- annotate_bpue(bpue1_area_CD, cols = c("ecoregion", "areacode", 
 fwrite(bpue2_area_CD, file = "data/bpue2_area_CD.csv", sep = ";",na="NA")
 ```
 
+
+#Total per year and per quarter CD 
+
+```{r}
+
+#Manually creating a weights value here for compatibility with the CIBBRiNA code
+
+obs3_area_CD[, weights := ifelse(year >= (max(years)-4),1,0.5)]
+
+
+```
+
+
 #### 2026 Baltic work ####
 
 
