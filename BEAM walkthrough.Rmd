@@ -300,7 +300,26 @@ bpue2_area_CD <- annotate_bpue(bpue1_area_CD, cols = c("ecoregion", "areacode", 
 fwrite(bpue2_area_CD, file = "data/bpue2_area_CD.csv", sep = ";",na="NA")
 ```
 
+##### 2026 Common Dolphin Case study #####
+
+```{r}
+obs3_area_CD <- subset(obs3,(ecoregion=="bay of biscay and the iberian coast") &
+                       (species=="delphinus delphis"))
+
+area_CD_m4_spec <- unique(obs3_area_CD[, .(ecoregion, areacode, metierl4, species)])
+
+bpue1_area_CD <- calc_bpue(needle = area_CD_m4_spec, 
+                        cols = c("ecoregion", "areacode", "metierl4", "species"),
+                        dat = obs3_area_CD[taxon_bycatch_monitor_ok==TRUE])
+
+fwrite(bpue1_area_CD, file = "data/bpue1_area_CD.csv", sep = ";",na="NA")
+
+bpue2_area_CD <- annotate_bpue(bpue1_area_CD, cols = c("ecoregion", "areacode", "metierl4"))
+fwrite(bpue2_area_CD, file = "data/bpue2_area_CD.csv", sep = ";",na="NA")
+```
+
 #
+
 
 metier L5 level analysis
 
