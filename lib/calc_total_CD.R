@@ -25,10 +25,10 @@ calc_total_CD <- function(bpue, analysis_resolution, dat, fishing, verbose = TRU
     # parallelization support
     if (nrow(bpue) > 1) {
         ret <- foreach(i = 1:nrow(bpue), 
-                       .export = "calc_total", # <- not 100% sure this line is needed.
+                       .export = "calc_total_CD", # <- not 100% sure this line is needed.
                        .final = rbindlist,
                        .packages = c("data.table", "glmmTMB", "emmeans", "ggeffects")) %dopar% {
-                           calc_total(bpue = bpue[i], analysis_resolution = analysis_resolution, dat = dat, fishing = fishing, verbose = FALSE, include.weights=include.weights,response=response, effort_term = effort_term,weights_values=weight_values, filter=filter)
+                           calc_total_CD(bpue = bpue[i], analysis_resolution = analysis_resolution, dat = dat, fishing = fishing, verbose = FALSE, include.weights=include.weights,response=response, effort_term = effort_term,weights_values=weight_values, filter=filter)
                        }
         return(ret)
     }
