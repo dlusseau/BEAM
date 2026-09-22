@@ -38,7 +38,7 @@ beam_get_raw_data <- function(filename, years, force_download = FALSE, verbose =
     # depending on which data we're getting 
     if (api %in% 1:3) {
         url <- sprintf(ices_api_urls[[api]], paste0(years, collapse = ","))
-        info <- sprintf(" (years=%s-%s)", min(years), max(years))
+        info <- sprintf(" (years=%s-%s)", min(years), max(years)+1)
     } else if (api == 4) {
         url <- sprintf(ices_api_urls[[api]], max(years)+1)
         info <- sprintf(" (year=%d)", max(years)+1)
@@ -51,7 +51,11 @@ beam_get_raw_data <- function(filename, years, force_download = FALSE, verbose =
     
     t_start <- Sys.time()
     
+    if (packageVersion("icesConnect")<"1.2") {
     resp <- icesConnect::ices_get_jwt(url, username = ices_username, jwt = ices_token, quiet = TRUE)
+    } else {
+    resp <- icesConnect::ices_get_jwt(url, jwt = ices_token, quiet = TRUE)  
+    }
     dat <- jsonlite::fromJSON(httr::content(resp, as = "text"))
     fwrite(dat, file = filename, sep = ";")
     
