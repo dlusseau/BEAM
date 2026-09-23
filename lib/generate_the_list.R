@@ -56,6 +56,31 @@ clean_chars(ecoreg_species) # fix misc. character issues
 ecoreg_species[, aphiaid := unique(na.omit(aphiaid))[1], species] # fill in NAs
 ecoreg_species <- unique(ecoreg_species) # remove duplicates
 
+##### 2026 fix to data call 2026 misnomer
+
+ecoreg_species$ecoregion[ecoreg_species$ecoregion=="arcticocean"]<-"arctic ocean"
+ecoreg_species$ecoregion[ecoreg_species$ecoregion=="bay of biscay and iberian coast"]<-"bay of biscay and the iberian coast"
+
+keep_eco <- c(
+  "barents sea",
+  "norwegian sea",
+  "icelandic waters",
+  "greenland sea",
+  "arctic ocean"
+)
+
+ecoreg_species <- ecoreg_species[
+  !(species == "pagophilus groenlandicus" &
+      !ecoregion %in% keep_eco)]
+
+
+
+#############################################################
+
+ecoreg_species <- unique(ecoreg_species) # remove duplicates
+
+
+
 obs3 <- obs3[ecoreg_species, on = "ecoregion", allow.cartesian = TRUE]
 
 das_per_ecoregion <- obs3[, .(daysAtSea2017_2023 = sum(daysatsea, na.rm=T)), ecoregion][order(ecoregion)]
