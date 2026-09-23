@@ -185,6 +185,31 @@ obs1$country[obs1$country=="GB-NIR"]<-"GB"
 
 ```
 
+
+```{r 2025PTFix, eval=FALSE}
+
+sel <- all1[
+  ecoregion == "Bay of Biscay and the Iberian Coast" &
+  metierL4 == "GNS" &
+  country == "PT"
+]
+
+new <- rbind(
+  copy(sel)[, `:=`(metierL4 = "GTR", daysAtSeaF = daysAtSeaF * 0.69)],
+  copy(sel)[, daysAtSeaF := daysAtSeaF * 0.31]
+)
+
+all1 <- rbind(
+  all1[!(ecoregion == "Bay of Biscay and the Iberian Coast" &
+         metierL4 == "GNS" &
+         country == "PT")],
+  new
+)
+
+fwrite(all1,"data/all1_postcorrection.csv",sep = ";",na="NA")
+
+```
+
 ###############################################################################################################
 ## Data cleaning and preparation
 ###############################################################################################################
@@ -787,9 +812,43 @@ library(emmeans)
 library(data.table)
 
 ##bpue_estimates
+full_data <-obs3
+bpues_estimates <-bpue1
+
+source("lib/reliability_estimation_wkmamby.R")
 
 
-source("lib/reliability_estimation_p.R")
+
+tot_reliability <- tot1
+
+tot_reliability[bpues_estimates,
+                on = .(ecoregion, metierl4, species),
+                reliability_rmse := i.reliability_rmse]
+
+tot_reliability$tot_lwr_log <- log10(tot_reliability$tot_lwr+1)
+tot_reliability$tot_upr_log<-log10(tot_reliability$tot_upr+1)
+tot_reliability$delta<-tot_reliability$tot_upr_log-tot_reliability$tot_lwr_log
+
+tot_reliability$reliability_CI <- tot_reliability$delta < 2
+
+monitoring_cutoff <- bpue2
+monitoring_cutoff$monitoring_coverage <- monitoring_cutoff$daysatsea/monitoring_cutoff$daysatseaf
+
+tot_reliability[monitoring_cutoff,
+                on = .(ecoregion, metierl4, species),
+                monitoring_coverage := i.monitoring_coverage]
+
+tot_reliability$reliability_coverage <- tot_reliability$monitoring_coverage > 0.001
+
+tot_reliability$overall_reliability <- tot_reliability$reliability_CI == TRUE & tot_reliability$reliability_rmse == TRUE & tot_reliability$reliability_coverage ==TRUE
+
+#Need to bring in the zeros ?
+
+tot_reliability[tot_mean == 0, overall_reliability := TRUE]
+
+fwrite(tot_reliability, "results/tot_reliability.csv")
+
+
 ```
 
 
