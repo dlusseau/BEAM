@@ -1,0 +1,58 @@
+---
+title: "BEAM_walkthrough_CommonDolphinBOBIC"
+author: "WGBYC_ToRC"
+date: "2026-09-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Common dolphin BOBIC ecoregion case study
+
+```{r library load,  eval=FALSE}
+# imports all R packages that are needed for BEAM
+library(data.table) # data wrangling
+library(reshape2) # data wrangling
+library(icesConnect) # downloading data from ICES servers
+library(httr) # parsing downloaded data above
+library(jsonlite) # parsing downloaded data
+library(glmmTMB) # model fitting
+library(metafor) # testing heterogeneity 
+library(ggeffects) # BPUE estimation
+library(emmeans) # BPUE estimation, don't go above emmeans  #1.11.0 or it explodes!!!
+library(this.path) # for auto-detecting the dir a script is executing out of
+library(doSNOW) # parallel computation
+library(doParallel) # parallel computation
+library(progress) # lotion for impatient minds
+library(this.path)
+library(stringdist) # data checking and cleaning (string manipulation)
+library(stringi)
+#library(taxize) # data cleaning
+library(taxizedb) # data cleaning, devtools::install_github("ropensci/taxizedb")
+library(countrycode) # to convert between 2 and 3- letter country codes 
+library(tcltk)
+library(ggplot2)
+library(reshape2)
+library(systemfonts)
+library(flextable) #not quite well built
+library(scales)
+library(countrycode)
+library(stringi)
+library(stringr)
+library(dplyr)
+library(tidyr)
+
+```
+
+```{r, load functions,  eval=FALSE}
+setwd(this.path::this.dir())
+source("lib/beam_lib.R")
+```
+
+```{r load credentials,  eval=FALSE}
+ices_username <- readLines("username.txt")
+ices_token<-readLines("token.txt")
+```
+
