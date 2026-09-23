@@ -400,6 +400,9 @@ fwrite(tot_reliability, "results/tot_reliability.csv")
 
 
 #######################################################
+#######################################################
+#######################################################
+
 
 ```{r visualise, eval=FALSE}
 library(tidyverse)
@@ -424,54 +427,6 @@ runApp("lib/Sample_retention_BEAM_flow_chart_2025.R")
 all plots are saved in the results folder
 
 
-###############################################################################################################
-## Reliability measures - added September 2025
-###############################################################################################################
-
-
-here we try to provide some posthoc insight about the usefulness of the mean estimate when a bycatch estimate can be produced. This does not speak to the validity of the bycatch estimate, but simply tries to captures statistical notions that may be hard to interpret if users only focus on the mean estimate. we focus on two dimensions of reliability for the mean estimate.   
-The first one captures the information conveyed by the breadth of the confidence interval; its uncertainty. We simply colour code estimates for which the confidence interval is more than two orders of magnitude as an estimate to be less reliable (in that the mean estimate does not tell us much about the likely true value of the total bycatch that occurred).  
-The second one captures a notion of robustness of the estimates. We used a leave-one-out jackknifing approach to reestimate BPUEs for the cases when we could produce a total bycatch estimate. Given n replicates for a given model, we therefore fitted n models and obtained n jackknifed BPUE estimates. we use a RMSE approach to compare the jackknife BPUE estimate to the "observed" BPUE estimate. We used the log of the estimate ratios.  
-
-```{r reliability,eval=FALSE}
-
-library(glmmTMB)
-library(ggeffects)
-library(emmeans)
-library(data.table)
-
-source("lib/reliability_estimation_p.R")
-
-```
-
-```{r reliability measures, eval=FALSE}
-#code snippet from reliability_estimation.R to see how logRMSE is computed and used
-
-#code in rmse_estimator function
-diffs[j] <- sum((log1p(full_pred$predicted)-log1p(jack_pred$predicted))^2, 
-                        na.rm = T)/nrow(full_pred) #for cases when we have multiple BPUEs estimated for a case depending on variable(s) levels
-rmses[i] <<- sqrt(sum(diffs, na.rm=TRUE)/(nrow(full_data_subset)-1))
-
-#...
-
-bpues_estimates$RMSE<-rmse_estimator(full_data = full_data,
-                     bpues_estimates = bpues_estimates)
-
-
-# Transform back from log scale
-bpues_estimates$factor <- exp(bpues_estimates$RMSE)
-
-# The lower limit of the 68% interval is: 100(1-1/factor) # in percentage
-bpues_estimates$lower_factor_prop <- 100*(1-1/bpues_estimates$factor)
-# The upper limit of the 68% interval is: 100(factor−1) # in percentage
-bpues_estimates$upper_factor_prop <- 100*(bpues_estimates$factor-1)
-
-# we take an arbitrary threshold on 25%
-bpues_estimates$reliability <- bpues_estimates$lower_factor_prop <= 25 & bpues_estimates$upper_factor_prop <= 25
-
-
-```
-
 this produces bpues_estimates saved as bpue_table_print_reliability_subset.csv in results folder  
 
 We invite readers to read ICES WGBYC 2025 report for case studies which helps to understand this a bit more. We will aim to run through some of those case studies during the benchmark process.
@@ -481,17 +436,14 @@ we then merge this information back in the table which is then produced online a
 
 ```{r production of final table for reporting, eval=FALSE}
 
-bpues_estimates$reliability2<-FALSE
-bpues_estimates$reliability2[bpues_estimates$delta<2&bpues_estimates$upper_factor_prop <= 25&bpues_estimates$lower_factor_prop <= 25]<-TRUE
-
 temp<-merge(table.print,bpues_estimates,by.x=c("ecoregion","metierl4","species"),by.y=c("Ecoregion","metier L4","Species"),all.x=TRUE)
 
 #We are now adding a color flag based on a bivariate scale combining information on reliability and monitoring coverage. The color column contain the HEX code for plotting, and the flag_description column indicates what the color means (e.g. uncertain estimate and low monitoring, more reliable estimate and monitoring above satisfactory theshold...)
 
-table.print$reliability<-FALSE
-table.print$reliability[which(temp$reliability2==TRUE)]<-TRUE
-
-table.print <- add_color_flag(table.print, bpue2) #Uses monitoring coverage from bpue2 and reliability info present in table.print
+# table.print$reliability<-FALSE
+# table.print$reliability[which(temp$reliability2==TRUE)]<-TRUE
+# 
+# table.print <- add_color_flag(table.print, bpue2) #Uses monitoring coverage from bpue2 and reliability info present in table.print
 
 #Convert TRUE/FALSE to qualifiers for printing
 table.print$reliability <- ifelse(
@@ -513,90 +465,6 @@ fwrite(subset(table.print,reliability=="more reliable"),file="results/table_reli
 
 
 
-Here we can also run it at the ices area and metier level 5 levels
-########################################################
-### cases we want to run
-#######################################################
-```{r get data subscale, eval=FALSE}
-## these are hand curated, you can see that you do not find this data file produced in the code above
-icesarea<-fread("data/cases_with_total_bycatch_area_mammals.csv")
-L5<-fread("data/cases_with_total_bycatch_L5_mammals.csv")
-icesareacases<-icesarea[!is.na(icesarea$tot_mean)&icesarea$taxa=="mammals",]
-L5cases<-L5[!is.na(L5$tot_mean)&L5$taxa=="mammals",]
-
-```
-
-
-```{r reliability in function, eval=FALSE}
-
-source("lib/reliability_estimation_p_ready.r")
-
-realibility_general(obs3=obs3_area,bpues=bpue1_area,cols = c("ecoregion", "areacode","metierl4", "species"),fileoutput="results/bpue_table_print_reliability_subset_area.csv")
-
-realiabilitydf<-fread("results/bpue_table_print_reliability_subset_area.csv")
-
-icesareacases[realiabilitydf, on = c("ecoregion","areacode","metierl4","species"), reliability := i.reliability]
-icesareacases$delta<-log10(icesareacases$tot_upr+1)-log10(icesareacases$tot_lwr+1)
-
-icesareacases$reliability2<-FALSE
-icesareacases$reliability2[icesareacases$reliability==TRUE&icesareacases$delta<2]<-TRUE
-
-#Adding the color flag at this point.
-
-#The column output from reliability2 needs to be called reliability as in the example above at the ecoregion x metierl4 scale.
-
-icesareacases$reliability <- icesareacases$reliability2 
-
-icesareacases <- add_color_flag(icesareacases, bpue2_area) #Uses monitoring coverage from bpue2_area and reliability info present in icesareacases
-
-#Convert TRUE/FALSE to qualifiers
-icesareacases$reliability <- ifelse(
-  icesareacases$reliability,
-  "more reliable",
-  "uncertain"
-)
-
-fwrite(icesareacases,file="results/icesareacases.csv")
-
-#########
-
-realibility_general(obs3=obs3_l5,bpues=bpue1_l5,cols = c("ecoregion","metierl4","metierl5", "species"),fileoutput="results/bpue_table_print_reliability_subset_l5.csv")
-
-realiabilitydf<-fread("results/bpue_table_print_reliability_subset_l5.csv")
-
-L5cases[realiabilitydf, on = c("ecoregion","metierl4","metierl5","species"), reliability := i.reliability]
-L5cases$delta<-log10(L5cases$tot_upr+1)-log10(L5cases$tot_lwr+1)
-
-L5cases$reliability2<-FALSE
-L5cases$reliability2[L5cases$reliability==TRUE&L5cases$delta<2]<-TRUE
-
-#Adding the color flag at this point.
-
-#The column output from reliability2 needs to be called reliability as in the example above at the ecoregion x metierl4 scale.
-
-L5cases$reliability <- L5cases$reliability2 
-
-L5cases <- add_color_flag(L5cases, bpue2_L5) #Uses monitoring coverage from bpue2_L5 and reliability info present in L5cases
-
-#Convert TRUE/FALSE to qualifiers
-L5cases$reliability <- ifelse(
-  L5cases$reliability,
-  "more reliable",
-  "uncertain"
-)
-
-
-fwrite(L5cases,file="results/L5cases.csv")
-
-```
-
-
-
-
-
-
-
-
 ###############################################################################################################
 ## Reliability visualisation - added September 2025
 ###############################################################################################################
@@ -606,45 +474,5 @@ last we plot the total bycatch estimates for species x ecoregion x metier level 
 1. full plot with confidence bands in orange for the 'less reliable' estimates  
 2. subset of only more reliable estimates  
 3. subset of only more reliable estimates ordered by bycatch estimates (plotted below)  
-
-
-
-## mammals retained post reliability checks  
-```{r, eval=FALSE, echo=FALSE, out.width="90%"}
-knitr::include_graphics("results/totalbycatch_mammals_reliability_check_ordered.png")
-```
-  
-  
-  
-## birds retained post reliability checks  
-```{r, eval=FALSE, echo=FALSE, out.width="90%"}
-knitr::include_graphics("results/totalbycatch_seabirds_reliability_check_ordered.png")
-```
-  
-  
-    
-## turtles retained post reliability checks  
-```{r, eval=FALSE, echo=FALSE, out.width="90%"}
-knitr::include_graphics("results/totalbycatch_turtles_reliability_check_ordered.png")
-```
-  
-    
-    
-## elasmobranchs retained post reliability checks  
-```{r, eval=FALSE, echo=FALSE, out.width="90%"}
-knitr::include_graphics("results/totalbycatch_elasmobranchs_reliability_check_ordered.png")
-```
-  
-  
- 
-## fish retained post reliability checks  
-```{r, eval=FALSE, echo=FALSE, out.width="90%"}
-knitr::include_graphics("results/totalbycatch_fish_reliability_check_ordered.png")
-```
-
-
-
-
-
 
 
