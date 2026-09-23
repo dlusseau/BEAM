@@ -57,7 +57,7 @@ calc_bpue <- function(needle, cols = colnames(needle), min_re_obs = 2, dat, year
                        .final = rbindlist,
                        .packages = c("data.table", "glmmTMB", "metafor", "emmeans"),
                        .options.snow = opts) %dopar% {
-            calc_bpue(needle = needle[i], cols = cols, min_re_obs = min_re_obs, dat = dat, include.weights)
+            calc_bpue(needle = needle[i], cols = cols, min_re_obs = min_re_obs, dat = dat, years, include.weights)
                        }
         
         BEAM_pb$terminate()
