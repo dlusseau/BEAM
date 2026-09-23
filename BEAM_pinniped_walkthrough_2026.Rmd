@@ -1,0 +1,615 @@
+---
+title: "BEAM walkthrough - grey seal, harbour seal and combined pinniped case"
+author: "WGBYC ToR C group"
+date: "2026-09-23"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Purpose
+
+This is a small extension of the standard BEAM workflow for a pooled pinniped endpoint.
+
+Grey seal (`halichoerus grypus`) and harbour seal (`phoca vitulina`) already exist as normal BEAM species. The combined endpoint does not: it is defined here as grey seal + harbour seal + records identified only as `phocidae` or `pinnipedia`. It therefore has to be constructed **before** `calc_bpue()` is called.
+
+The custom helper only performs that upstream construction. It gives the pooled endpoint one D2 monitoring denominator per standard BEAM monitoring cell and pools the corresponding D3 incidents at the same grain. After that, the normal BEAM modelling procedure is used: `calc_bpue()` estimates BPUE, `annotate_bpue()` annotates the result, and `calc_total()` raises it using D1 fishing effort.
+
+The pure grey and pure harbour endpoints are not altered. All life stages represented in the source data are included. Unresolved `Phocidae`/`Pinnipedia` records are included only in the combined endpoint and are also exported separately as an audit.
+
+The modelling resolution in this case is `ecoregion x exact ICES area code x metier L4 x endpoint`. Composite area codes containing `~` are not split among areas.
+
+# 1. Standard BEAM setup
+
+Use the normal BEAM repository and libraries.
+
+```{r libraries}
+library(data.table)
+library(reshape2)
+library(icesConnect)
+library(httr)
+library(jsonlite)
+library(glmmTMB)
+library(metafor)
+library(ggeffects)
+library(emmeans)
+library(this.path)
+library(doSNOW)
+library(doParallel)
+library(progress)
+library(stringdist)
+library(stringi)
+library(taxizedb)
+library(countrycode)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(scales)
+
+setwd(this.path::this.dir())
+source("lib/beam_lib.R")
+source("lib/pinniped_case.R")
+```
+
+```{r credentials-years}
+ices_username <- readLines("username.txt")
+ices_token <- readLines("token.txt")
+
+years <- 2017:2025
+final_year <- max(years)
+
+# Standard BEAM cache behaviour is retained. Set TRUE when the local D1/D2/D3
+# cache should be refreshed from ICES.
+FORCE_DOWNLOAD <- FALSE
+```
+
+Optional parallel backend, as in the standard walkthrough:
+
+```{r cluster}
+detectCores()
+ncores <- 12
+cl <- makeCluster(ncores)
+registerDoSNOW(cl)
+```
+
+# 2. Standard BEAM data fetch and cleaning
+
+Keep the existing BEAM fetching and cleaning procedure.
+
+```{r get-data}
+all1 <- beam_get_raw_data(
+  "data/all1.csv",
+  years = years,
+  force_download = FORCE_DOWNLOAD
+)
+
+obs1 <- beam_get_raw_data(
+  "data/obs1.csv",
+  years = years,
+  force_download = FORCE_DOWNLOAD
+)
+
+bycatch1 <- beam_get_raw_data(
+  "data/bycatch1.csv",
+  years = years,
+  force_download = FORCE_DOWNLOAD
+)
+
+
+```
+
+Retain the data corrections used by the current master BEAM walkthrough before calling `clean_data.R`. For the 2025 assessment these are the GB VL0010/GB-NIR corrections and the Portugal GNS/GTR fishing-effort correction.
+
+```{r annual-fixes}
+# Current upstream 2025 GB correction
+vl0010_2025 <- subset(
+  all1,
+  vesselLengthRange == "VL0010" & year == 2024 & country == "GB"
+)
+vl0010_2025$year <- 2025
+all1 <- rbind(all1, vl0010_2025)
+
+obs1$country[obs1$country == "GB-NIR"] <- "GB"
+
+# Current upstream 2025 Portugal correction
+sel <- all1[
+  ecoregion == "Bay of Biscay and the Iberian Coast" &
+    metierL4 == "GNS" &
+    country == "PT"
+]
+
+new <- rbind(
+  copy(sel)[, `:=`(metierL4 = "GTR", daysAtSeaF = daysAtSeaF * 0.69)],
+  copy(sel)[, daysAtSeaF := daysAtSeaF * 0.31]
+)
+
+all1 <- rbind(
+  all1[!(ecoregion == "Bay of Biscay and the Iberian Coast" &
+           metierL4 == "GNS" &
+           country == "PT")],
+  new
+)
+
+# Case-specific audit copy; the in-memory all1 object is what clean_data.R uses.
+fwrite(
+  all1,
+  "data/pinniped_case_all1_postcorrection.csv",
+  sep = ";",
+  na = "NA"
+)
+```
+
+```{r standard-cleaning}
+source("lib/clean_data.R")
+source("lib/generate_the_list.R")
+
+obs3_standard <- copy(obs3)
+bycatch3_standard <- copy(bycatch3)
+```
+
+Because these scripts are sourced from the BEAM repository at run time, the pinniped case inherits the current upstream preparation rules.
+
+
+# 3. Construct the pinniped endpoints
+
+The helper performs the only case-specific data preparation.
+
+```{r prepare-pinnipeds}
+pinniped <- prepare_pinniped_case(
+  obs3_standard = obs3_standard,
+  bycatch3_standard = bycatch3_standard,
+  obs2 = obs2,
+  bycatch2 = bycatch2,
+  all2 = all2,
+  results_dir = "results"
+)
+
+obs3_pinniped <- pinniped$obs3
+all2_pinniped <- pinniped$all2
+
+# Standard downstream BEAM functions use the global obs3 object.
+obs3 <- obs3_pinniped
+```
+
+The three endpoints are:
+
+- `halichoerus grypus` - pure grey seal;
+- `phoca vitulina` - pure harbour seal;
+- `grey_harbour` - grey + harbour + `phocidae` + `pinnipedia`.
+
+The pooled D2 denominator is used once per monitoring cell; it is not summed across species.
+
+## 3.1 Review unresolved pinnipeds
+
+These animals are already included in `grey_harbour`, but the audit makes their contribution visible.
+
+```{r unresolved}
+pinniped$unresolved_totals
+pinniped$unresolved_area_summary
+```
+
+Detailed outputs are written to:
+
+- `results/pinniped_case_unclassified_detail.csv`
+- `results/pinniped_case_unclassified_area_summary.csv`
+- `results/pinniped_case_unclassified_totals.csv`
+
+Useful QC, here the monitoring_denominator_qc and the unmatched_pooled_bycatch should give zero rows :
+
+```{r prep-qc}
+pinniped$count_qc
+pinniped$monitoring_denominator_qc
+pinniped$unmatched_pooled_bycatch
+```
+
+# 4. Standard BEAM BPUE estimation
+
+From here the standard BEAM modelling functions are used. The helper has only created the valid pooled input required for the endpoint.
+
+```{r bpue}
+area_cols <- c(
+  "ecoregion",
+  "areacode",
+  "metierl4",
+  "species"
+)
+
+area_m4_spec <- unique(
+  obs3_pinniped[, ..area_cols]
+)
+
+bpue1_pinniped_area <- calc_bpue(
+  needle = area_m4_spec,
+  cols = area_cols,
+  dat = obs3_pinniped[taxon_bycatch_monitor_ok == TRUE],
+  years = years,
+  include.weights = TRUE
+)
+
+fwrite(
+  bpue1_pinniped_area,
+  "data/pinniped_case_bpue1_area.csv",
+  sep = ";",
+  na = "NA"
+)
+```
+
+`areacode` is part of the grouping key, so each exact ICES area code x métier-L4 x endpoint case is passed separately to `calc_bpue()`.
+
+# 5. Standard BEAM annotation
+
+```{r annotation}
+bpue2_pinniped_area <- annotate_bpue(
+  bpue1_pinniped_area,
+  cols = c("ecoregion", "areacode", "metierl4")
+)
+```
+
+Continue to use the standard BEAM zero/NA handling for the assessment. decisions.
+
+For transparency, we add descriptive information about the data behind each returned BPUE row. This is diagnostic only.
+
+```{r bpue-diagnostics}
+bpue2_pinniped_area <- add_pinniped_diagnostics(
+  bpue = bpue2_pinniped_area,
+  obs3_pinniped = obs3_pinniped,
+  cols = area_cols
+)
+
+bpue2_pinniped_area[
+  result_status != "BPUE estimated",
+  .(
+    ecoregion,
+    areacode,
+    metierl4,
+    species,
+    observed_n,
+    monitored_days,
+    n_monitoring_cells,
+    model,
+    bpue,
+    result_status
+  )
+]
+```
+
+This distinguishes, where the returned information permits it, cases such as:
+
+- `BPUE estimated`;
+- `zero observed; no BPUE model retained`;
+- `zero observed; BPUE=0 returned by BEAM`;
+- `positive bycatch; BPUE unavailable`.
+
+These labels do not feed back into `calc_bpue()` or change any estimate.
+
+# 6. Raise using final-year D1 fishing effort
+
+`clean_data.R` has already restricted `all2` to the final assessment year. For `years <- 2017:2025`, the raising effort is therefore 2025 D1 effort.
+
+```{r check-final-year}
+stopifnot(all(unique(all2_pinniped$year) == final_year))
+```
+
+```{r total}
+tot1_pinniped_area <- calc_total(
+  bpue = bpue1_pinniped_area,
+  cols = area_cols,
+  obs = obs3_pinniped[taxon_bycatch_monitor_ok == TRUE],
+  allx = all2_pinniped,
+  years = years,
+  include.weights = TRUE,
+  verbose = FALSE
+)
+
+fwrite(
+  tot1_pinniped_area,
+  "data/pinniped_case_tot1_area.csv",
+  sep = ";",
+  na = "NA"
+)
+```
+
+# 7. Final results and diagnostics
+
+Join the standard BEAM outputs and retain the observed-data diagnostics.
+
+```{r final-results}
+total_cols <- intersect(
+  c(
+    area_cols,
+    "tot_mean",
+    "tot_lwr",
+    "tot_upr",
+    "message",
+    "fishing_effort"
+  ),
+  names(tot1_pinniped_area)
+)
+
+pinniped_results <- merge(
+  bpue2_pinniped_area,
+  tot1_pinniped_area[, ..total_cols],
+  by = area_cols,
+  all.x = TRUE
+)
+
+unresolved_2025 <- pinniped$unresolved_area_summary[
+  year == final_year,
+  .(unclassified_observed_2025 = sum(n_unclassified, na.rm = TRUE)),
+  by = .(ecoregion, areacode, metierl4)
+]
+
+pinniped_results[
+  unresolved_2025,
+  on = .(ecoregion, areacode, metierl4),
+  unclassified_observed_2025 := i.unclassified_observed_2025
+]
+
+pinniped_results[
+  is.na(unclassified_observed_2025),
+  unclassified_observed_2025 := 0
+]
+
+# The unresolved count contributes only to the pooled endpoint.
+pinniped_results[
+  species != "grey_harbour",
+  unclassified_observed_2025 := NA_real_
+]
+
+pinniped_results[, endpoint := fcase(
+  species == "halichoerus grypus", "Grey seal",
+  species == "phoca vitulina", "Harbour seal",
+  species == "grey_harbour", "Grey + harbour + unresolved pinnipeds",
+  default = species
+)]
+
+pinniped_results <- add_pinniped_total_status(pinniped_results)
+
+setcolorder(
+  pinniped_results,
+  c(
+    "endpoint",
+    "species",
+    "ecoregion",
+    "areacode",
+    "metierl4",
+    setdiff(
+      names(pinniped_results),
+      c("endpoint", "species", "ecoregion", "areacode", "metierl4")
+    )
+  )
+)
+
+fwrite(
+  pinniped_results,
+  "results/pinniped_case_area_results_2025.csv",
+  sep = ";",
+  na = "NA"
+)
+```
+
+A compact diagnostic view of cases without a raised estimate is:
+
+```{r final-diagnostics}
+pinniped_results[
+  total_status != "raised estimate available",
+  .(
+    endpoint,
+    ecoregion,
+    areacode,
+    metierl4,
+    observed_n,
+    monitored_days,
+    model,
+    bpue,
+    result_status,
+    total_status,
+    message
+  )
+]
+```
+
+The diagnostic columns describe the returned BEAM result; they do not change the original model or raising workflow.
+
+# 8. Visualise raised estimates
+
+The two plots below use only cases where BEAM returned a raised estimate and its uncertainty interval. The three endpoints are shown together for direct comparison. Within each area x métier row, the positions are intentionally offset slightly on the y-axis.
+
+`CLOSE_TO_ZERO` defines the split between the overview plot and the dedicated plot with lower total estimates. It is a presentation threshold only to better review the results; it does not affect any BPUE or raised estimate. Currently it is advisable to have this threshold quite high to sort out cases where the differences makes a big difference.
+
+```{r raised-estimate-plots}
+CLOSE_TO_ZERO <- 150
+
+plot_data <- pinniped_results %>%
+  filter(
+    total_status == "raised estimate available",
+    !is.na(tot_mean),
+    !is.na(tot_lwr),
+    !is.na(tot_upr)
+  ) %>%
+  mutate(
+    areacode = as.character(areacode),
+    metierl4 = toupper(as.character(metierl4)),
+    area_metier = paste(areacode, metierl4, sep = " | "),
+    endpoint = factor(
+      endpoint,
+      levels = c(
+        "Grey seal",
+        "Harbour seal",
+        "Grey + harbour + unresolved pinnipeds"
+      )
+    ),
+    # Raised bycatch cannot be negative; clamp only for plotting if a
+    # numerical lower interval happens to fall below zero for some reason.
+    tot_lwr_plot = pmax(tot_lwr, 0)
+  )
+
+# Give each endpoint a fixed vertical offset within an area x métier row.
+# This avoids overlapping points/intervals while keeping all endpoints in
+# one comparison panel.
+add_endpoint_positions <- function(dat) {
+  endpoint_offsets <- c(
+    "Grey seal" = -0.22,
+    "Harbour seal" = 0,
+    "Grey + harbour + unresolved pinnipeds" = 0.22
+  )
+
+  area_order <- dat %>%
+    group_by(area_metier) %>%
+    summarise(order_value = max(tot_mean, na.rm = TRUE), .groups = "drop") %>%
+    arrange(order_value) %>%
+    pull(area_metier)
+
+  dat %>%
+    mutate(
+      area_metier = factor(area_metier, levels = area_order),
+      y_base = as.numeric(area_metier),
+      y_position = y_base + endpoint_offsets[as.character(endpoint)]
+    )
+}
+
+# Plot 1: estimates that are not close to zero --------------------------
+plot_data_main <- plot_data %>%
+  filter(tot_mean > CLOSE_TO_ZERO) %>%
+  add_endpoint_positions()
+
+if (nrow(plot_data_main) > 0) {
+  main_levels <- levels(plot_data_main$area_metier)
+
+  p_pinniped_case_main <- ggplot(
+    plot_data_main,
+    aes(colour = endpoint)
+  ) +
+    geom_segment(
+      aes(
+        x = tot_lwr_plot,
+        xend = tot_upr,
+        y = y_position,
+        yend = y_position
+      ),
+      linewidth = 0.55
+    ) +
+    geom_point(
+      aes(x = tot_mean, y = y_position),
+      size = 2.3
+    ) +
+    scale_y_continuous(
+      breaks = seq_along(main_levels),
+      labels = main_levels,
+      expand = expansion(add = 0.6)
+    ) +
+    labs(
+      x = "Predicted total bycatch (individuals)",
+      y = "ICES area | métier level 4",
+      title = "Raised pinniped bycatch estimates",
+      subtitle = paste0(
+        "Mean estimate > ", CLOSE_TO_ZERO
+      ),
+      colour = "Endpoint"
+    ) +
+    theme_bw() +
+    theme(
+      legend.position = "bottom",
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(),
+      axis.text.y = element_text(size = 8)
+    )
+
+  print(p_pinniped_case_main)
+
+  ggsave(
+    filename = "results/pinniped_case_raised_estimates_high.png",
+    plot = p_pinniped_case_main,
+    width = 11,
+    height = max(6, length(main_levels) * 0.28 + 2),
+    dpi = 300
+  )
+}
+
+# Plot 2: estimates close to zero --------------------------------------
+# This plot uses its own linear x-axis, so small estimates can be compared
+# without being compressed by the larger estimates in Plot 1.
+plot_data_near_zero <- plot_data %>%
+  filter(tot_mean <= CLOSE_TO_ZERO) %>%
+  add_endpoint_positions()
+
+if (nrow(plot_data_near_zero) > 0) {
+  near_zero_levels <- levels(plot_data_near_zero$area_metier)
+
+  p_pinniped_case_near_zero <- ggplot(
+    plot_data_near_zero,
+    aes(colour = endpoint)
+  ) +
+    geom_segment(
+      aes(
+        x = tot_lwr_plot,
+        xend = tot_upr,
+        y = y_position,
+        yend = y_position
+      ),
+      linewidth = 0.55
+    ) +
+    geom_point(
+      aes(x = tot_mean, y = y_position),
+      size = 2.3
+    ) +
+    scale_x_continuous(
+      labels = scales::label_number(accuracy = 0.1, big.mark = " "),
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    scale_y_continuous(
+      breaks = seq_along(near_zero_levels),
+      labels = near_zero_levels,
+      expand = expansion(add = 0.6)
+    ) +
+    labs(
+      x = "Predicted total bycatch (individuals)",
+      y = "ICES area | métier level 4",
+      title = "Raised pinniped bycatch estimates",
+      subtitle = paste0(
+        "Mean estimate <= ", CLOSE_TO_ZERO
+      ),
+      colour = "Endpoint"
+    ) +
+    theme_bw() +
+    theme(
+      legend.position = "bottom",
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(),
+      axis.text.y = element_text(size = 8)
+    )
+
+  print(p_pinniped_case_near_zero)
+
+  ggsave(
+    filename = "results/pinniped_case_raised_estimates_low.png",
+    plot = p_pinniped_case_near_zero,
+    width = 11,
+    height = max(6, length(near_zero_levels) * 0.28 + 2),
+    dpi = 300
+  )
+}
+```
+
+The plot files are written to:
+
+- `results/pinniped_case_raised_estimates_main.png`
+- `results/pinniped_case_raised_estimates_near_zero.png`
+
+# 9. Finish
+
+Restore the standard BEAM object if other taxa will be analysed in the same session.
+
+```{r restore}
+obs3 <- obs3_standard
+```
+
+```{r stop-cluster}
+stopCluster(cl)
+```
