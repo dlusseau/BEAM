@@ -1,0 +1,59 @@
+WGBYC 2026
+
+benchmark
+stickers
+risk scoring - survey yes/no/don't know spp x metier L4
+list - filter the med birds and mammals
+list - elasmobranchs...
+
+
+meeting rooms 7th floor main
+other building x3 coffee/lunch
+
+Andre, Morgane, Paula, Sara, Jani, Kim, Farina, Frazer, Katinka,
+
+first floor left sevad
+3rd floor 312
+
+
+###################################################################
+GFCM data fix
+
+med - area 37 ####DONE####
+
+all1
+GB - 2025 <10m use 2024 <10m fishing effort ####DONE####
+
+NI obs data to GB #####DONE#####
+
+protocol GB - check levels 
+
+thelist - rationalise seabird, mammal, reptile x ecoregion for the Med (missing from annex 01)
+
+
+for Portugal:
+#go from L4 GNS and L5 DEF stays the same
+#go from L4 GTR and L5 DEF to L4 GNS and L5 GTR-DEF
+
+no
+estimate GTR and GNS as usual - weight produced for GTR/GNS in fishing effort
+
+
+pinniped level estimate - at subdivision level
+
+
+specific case - 
+common dolphin x BoB + Iberian coast x tor b metiers  #[+ (PT-GTR) - extra level not needed now]
+for each year by metier in ToR B + purse seine
+
+
+plenary: do we from now on produce at subdivision level for Dd in BoB? 
+22 Sept plenary 9.00: it depends
+
+
+ringed seal Baltic
+porpoise Baltic
+
+###
+we need to redraw the risk table species x metier for the new species
+###

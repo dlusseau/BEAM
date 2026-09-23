@@ -53,7 +53,7 @@ bpues_estimates <- bpues_estimates[!is.na(BPUE), ]
 # Reduce the size removing NAs in totalbycatch
 # AM 15/10: changed to use data.table syntax. We should probably avoid spaces in var names...
 # bpues_estimates <- bpues_estimates[!is.na(bpues_estimates$total.bycatch.2024), ]
-bpues_estimates <- bpues_estimates[!is.na(`total bycatch 2024`), ]
+bpues_estimates <- bpues_estimates[!is.na(`total bycatch 2023`), ]
 
 #complete_bpues$RMSE <- 0
 full_data <- full_data[daysatsea > 0, ]
@@ -66,8 +66,12 @@ full_data[, logDAS := log(daysatsea)]
 
 ## this is a temporary fix introduced in 2025 to deal with a new request for which data will come
 #for this particular case---no anguilla in full data
-bpues_estimates<-bpues_estimates[Species!="anguilla anguilla",]
-bpues_estimates<-bpues_estimates[Species!="salmo salar",]
+
+########################################
+##### who knows - as directed in 2026 those are now again produced and dealt with at ADG session
+
+#bpues_estimates<-bpues_estimates[Species!="anguilla anguilla",]
+#bpues_estimates<-bpues_estimates[Species!="salmo salar",]
 
 calc_rmse <- function(full_data, bpue) {
   

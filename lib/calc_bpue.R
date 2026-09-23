@@ -55,9 +55,9 @@ calc_bpue <- function(needle, cols = colnames(needle), min_re_obs = 2, dat, year
         ret <- foreach(i = 1:nrow(needle),
                        .export = "calc_bpue", # <- not 100% sure this line is needed.
                        .final = rbindlist,
-                       .packages = c("data.table", "glmmTMB", "metafor", "emmeans"),
+                       .packages = c("data.table", "glmmTMB", "metafor", "emmeans", "lme4"),
                        .options.snow = opts) %dopar% {
-            calc_bpue(needle = needle[i], cols = cols, min_re_obs = min_re_obs, dat = dat, include.weights)
+            calc_bpue(needle = needle[i], cols = cols, min_re_obs = min_re_obs, dat = dat, years, include.weights)
                        }
         
         BEAM_pb$terminate()
@@ -88,7 +88,7 @@ calc_bpue <- function(needle, cols = colnames(needle), min_re_obs = 2, dat, year
         bpue <- dat$n_ind / dat$daysatsea
         lwr <- bpue -1.96 * sqrt(dat$n_ind / dat$daysatsea^2)
         upr <- bpue +1.96 * sqrt(dat$n_ind / dat$daysatsea^2)
-        ret[, c("bpue", "lwr", "upr", "model") := list(bpue, lwr, upr, "only one")]
+        ret[, c("model", "bpue", "lwr", "upr", "replicates", "base_model_heterogeneity", "alternative_models_flag") := list("only one", ..bpue, ..lwr, ..upr, nrow(dat), NA_real_,NA_real_)]
         return(ret)
     }
     
@@ -185,13 +185,49 @@ calc_bpue <- function(needle, cols = colnames(needle), min_re_obs = 2, dat, year
         
         best_idx <- top_tier$Index[1]
         best <- candidates[[best_idx]]
+        best_formula <- formula(candidates[[best_idx]])
+      
+        #### WGBYC 2026 ####
+        # If monitoring method or sampling protocol is in the selected
+        # model, look for an alternative model in the AIC top tier
+        # which does not contain either variable.
+        
+        has_problematic_variables <- function(f) {
+          bars <- lme4::findbars(f)
+          
+          if (length(bars) == 0) {
+            return(FALSE)
+          }
+          
+          re_terms <- sapply(bars, function(x)
+            as.character(x[[3]]))
+          
+          any(re_terms %in% c("monitoringmethod", "samplingprotocol"))
+        }
+        
+        
+        if (has_problematic_variables(best_formula)) {
+          top_tier_filtered <- top_tier[!sapply(Index, function(i) {
+            has_problematic_variables(formula(candidates[[i]]))
+          })]
+          
+          if (nrow(top_tier_filtered) > 0) {
+            # Keep the same parsimony/AIC ordering after filtering
+            setorder(top_tier_filtered, Complexity, AIC)
+            
+            best_idx <- top_tier_filtered$Index[1]
+            best <- candidates[[best_idx]]
+            best_formula <- formula(best)
+          }
+        }
+        ####################
         
         if (nrow(top_tier) > 1) {
           ret$alternative_models_flag <- TRUE
         }
       }
     }
-  }
+    }
   
   # Final check for model validity before emmeans
   if (inherits(best, "glmmTMB")) {

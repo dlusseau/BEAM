@@ -15,6 +15,14 @@ all2[metierl6 == "-", metierl6 := NA]
 
 # Save complete data before subsetting, because we need it to compute coverage
 # later.
+
+
+### added 23 Sept 2026 - correction to be added post benchmark and agreed with countries at wkmamby
+#Divide effort by two for paired operations in some countries
+all2[  metierl4 %in% c("ptm", "ptb", "spr") &  !country %in% c("dnk", "nld"),  daysatseaf := daysatseaf / 2]
+
+
+
 fwrite(all2, "data/fishing_all_years.csv", sep = ";")
 
 #Grab specific year 
