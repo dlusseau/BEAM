@@ -56,3 +56,151 @@ ices_username <- readLines("username.txt")
 ices_token<-readLines("token.txt")
 ```
 
+```{r define years,  eval=FALSE}
+years <- seq(2017, year(Sys.Date())-1)
+```
+
+```{r create cluster,  eval=FALSE}
+detectCores()
+ncores<-12 #change this to what you want
+
+cl <- makeCluster(ncores)
+registerDoSNOW(cl)
+```
+
+## Download the data
+```{r get data, eval=FALSE}
+all1 <- beam_get_raw_data("data/all1.csv", years = years, force_download = FALSE)
+obs1 <- beam_get_raw_data("data/obs1.csv", years = years, force_download = FALSE)
+bycatch1 <- beam_get_raw_data("data/bycatch1.csv", years = years, force_download = FALSE)
+```
+
+```{r 2025GBFix, eval=FALSE}
+
+# Copy VL0010 rows from 2024
+vl0010_2025 <- subset(
+  all1,
+  vesselLengthRange == "VL0010" & year == 2024 & country=="GB"
+)
+# Change year
+vl0010_2025$year <- 2025
+# Append to original data
+all1 <- rbind(all1, vl0010_2025)
+
+
+obs1$country[obs1$country=="GB-NIR"]<-"GB"
+
+```
+
+
+```{r 2025PTFix, eval=FALSE}
+
+sel <- all1[
+  ecoregion == "Bay of Biscay and the Iberian Coast" &
+  metierL4 == "GNS" &
+  country == "PT"
+]
+
+new <- rbind(
+  copy(sel)[, `:=`(metierL4 = "GTR", daysAtSeaF = daysAtSeaF * 0.69)],
+  copy(sel)[, daysAtSeaF := daysAtSeaF * 0.31]
+)
+
+all1 <- rbind(
+  all1[!(ecoregion == "Bay of Biscay and the Iberian Coast" &
+         metierL4 == "GNS" &
+         country == "PT")],
+  new
+)
+
+fwrite(all1,"data/all1_postcorrection.csv",sep = ";",na="NA")
+
+```
+
+## Data cleaning and preparation
+```{r data clean, eval=FALSE}
+source("lib/clean_data.R")
+```
+
+```{r merge bycatch and monitoring, eval=FALSE}
+source("lib/generate_the_list.R")
+```
+
+```{r matching bycaught species and sampling protocol, eval=FALSE}
+#code snippet from generate_the_list.R
+obs3[,
+    taxon_bycatch_monitor_ok := (taxa_monitored %in% c("all","elasmobranchs~seabirds~mammals", "protectedspecies")) | (taxa_monitored == taxon)
+]
+
+obs3[taxon == "elasmobranchs" & taxa_monitored == "fish",
+     taxon_bycatch_monitor_ok := TRUE] #Taxon monitored is okay if fish was the protocol and they reported elasmobranchs
+
+obs3[taxon == "fish" & taxa_monitored == "elasmobranchs~seabirds~mammals",
+     taxon_bycatch_monitor_ok := FALSE] #Taxon monitored is not okay if fish were reported under elasmobranchs~seabirds~mammals
+
+```
+
+## BPUE estimation
+
+```{r}
+obs3_area_CD <- subset(obs3,(ecoregion=="bay of biscay and the iberian coast") &
+                       (species=="delphinus delphis"))
+
+area_CD_m4_spec <- unique(obs3_area_CD[, .(ecoregion, areacode, metierl4, species)])
+
+bpue1_area_CD <- calc_bpue(needle = area_CD_m4_spec, 
+                        cols = c("ecoregion", "areacode", "metierl4", "species"),
+                        include.weights = T,
+                        dat = obs3_area_CD[taxon_bycatch_monitor_ok==TRUE],
+                        years = years)
+
+fwrite(bpue1_area_CD, file = "data/bpue1_area_CD.csv", sep = ";",na="NA")
+
+bpue2_area_CD <- annotate_bpue(bpue1_area_CD, cols = c("ecoregion", "areacode", "metierl4"))
+fwrite(bpue2_area_CD, file = "data/bpue2_area_CD.csv", sep = ";",na="NA")
+```
+
+
+## Total bycatch estimation, per yer and per quarter of the year
+For this study case, we are using a modified `calc_total` function - coming from CIBBRINAs code (`calc_total_CD`), adapted for the species.
+
+```{r}
+
+source("lib/calc_total_CD.R")
+
+#Manually creating a weights value here for compatibility with the CIBBRiNA code
+obs3_area_CD[, weights := ifelse(year >= (max(years)-4),1,0.5)]
+
+# Calculate totals for CD
+years # Already loaded at the beggining of the walkthrough
+quarters <- 1:4
+
+comb <- expand.grid(quarter = quarters, year = years)
+
+# modify colname for fishing effort
+all_CD <- fread("data/fishing_all_years.csv")
+
+all2_CD <- all_CD
+
+colnames(all2_CD)[13] <- "daysatsea"
+
+tot_CD <- NULL
+for(i in 1:nrow(comb)){
+  print(i)
+  output <- calc_total_CD(bpue = bpue2_area_CD, 
+                          analysis_resolution = c("ecoregion", "areacode", "metierl4", "species"),
+                          dat = obs3_area_CD, # the same that was given to calc_bpue
+                          fishing = all2_CD, 
+                          #verbose = T,
+                          #include.weights = T,
+                          response = "n_ind",
+                          effort_term = "daysatsea", 
+                          #weights_values = "weights",
+                          filter = list(year = comb$year[i], 
+                                        quarter = comb$quarter[i]))
+  tot_CD <- rbind(tot_CD, output)
+}
+
+fwrite(tot_CD, "results/tot_CD.csv")
+
+```
