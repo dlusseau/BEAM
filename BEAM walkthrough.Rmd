@@ -355,7 +355,8 @@ area_CD_m4_spec <- unique(obs3_area_CD[, .(ecoregion, areacode, metierl4, specie
 bpue1_area_CD <- calc_bpue(needle = area_CD_m4_spec, 
                         cols = c("ecoregion", "areacode", "metierl4", "species"),
                         include.weights = T,
-                        dat = obs3_area_CD[taxon_bycatch_monitor_ok==TRUE])
+                        dat = obs3_area_CD[taxon_bycatch_monitor_ok==TRUE],
+                        years = years)
 
 fwrite(bpue1_area_CD, file = "data/bpue1_area_CD.csv", sep = ";",na="NA")
 
