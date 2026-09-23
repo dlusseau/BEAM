@@ -1,0 +1,1054 @@
+---
+title: "BEAM walkthrough wgbyc 2026"
+author: "David Lusseau"
+date: "2026-09-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#load library
+
+```{r library load,  eval=FALSE}
+# imports all R packages that are needed for BEAM
+library(data.table) # data wrangling
+library(reshape2) # data wrangling
+library(icesConnect) # downloading data from ICES servers
+library(httr) # parsing downloaded data above
+library(jsonlite) # parsing downloaded data
+library(glmmTMB) # model fitting
+library(metafor) # testing heterogeneity 
+library(ggeffects) # BPUE estimation
+library(emmeans) # BPUE estimation, don't go above emmeans  #1.11.0 or it explodes!!!
+library(this.path) # for auto-detecting the dir a script is executing out of
+
+
+library(doSNOW) # parallel computation
+library(doParallel) # parallel computation
+library(progress) # lotion for impatient minds
+library(this.path)
+library(stringdist) # data checking and cleaning (string manipulation)
+library(stringi)
+#library(taxize) # data cleaning
+library(taxizedb) # data cleaning, devtools::install_github("ropensci/taxizedb")
+library(countrycode) # to convert between 2 and 3- letter country codes 
+library(tcltk)
+library(ggplot2)
+library(reshape2)
+library(systemfonts)
+library(flextable) #not quite well built
+library(scales)
+library(countrycode)
+library(stringi)
+library(stringr)
+library(dplyr)
+library(tidyr)
+
+```
+
+we then set the working directory and load the key functions
+
+```{r, load functions,  eval=FALSE}
+setwd(this.path::this.dir())
+source("lib/beam_lib.R")
+
+```
+
+
+For regular implementation: once you have been granted access you will receive an email to login at https://data.ices.dk/token  
+There you will generate a token which you need to copy and paste in the object below , eg, token<-"ewioubreuicvepb" which you can call in the function  
+do note the username: it should be the email (eg louis.attack@dartmouth.edu) you used to make the access request  
+
+```{r load credentials,  eval=FALSE}
+ices_username <- readLines("username.txt")
+ices_token<-readLines("token.txt")
+
+```
+
+we then set the range of years considered in the assessment. usually it is set as:
+```{r define years,  eval=FALSE}
+years <- seq(2017, year(Sys.Date())-1)
+```
+
+
+```{r create cluster,  eval=FALSE}
+detectCores()
+ncores<-10 #change this to what you want
+
+cl <- makeCluster(ncores)
+registerDoSNOW(cl)
+```
+
+
+###############################################################################################################
+## Download the data
+###############################################################################################################
+
+```{r get data, eval=FALSE}
+all1 <- beam_get_raw_data("data/all1.csv", years = years, force_download = FALSE)
+obs1 <- beam_get_raw_data("data/obs1.csv", years = years, force_download = FALSE)
+bycatch1 <- beam_get_raw_data("data/bycatch1.csv", years = years, force_download = FALSE)
+```
+
+```{r 2025GBFix, eval=FALSE}
+
+# Copy VL0010 rows from 2024
+vl0010_2025 <- subset(
+  all1,
+  vesselLengthRange == "VL0010" & year == 2024 & country=="GB"
+)
+# Change year
+vl0010_2025$year <- 2025
+# Append to original data
+all1 <- rbind(all1, vl0010_2025)
+
+
+obs1$country[obs1$country=="GB-NIR"]<-"GB"
+
+```
+
+
+```{r 2025PTFix, eval=FALSE}
+
+sel <- all1[
+  ecoregion == "Bay of Biscay and the Iberian Coast" &
+  metierL4 == "GNS" &
+  country == "PT"
+]
+
+new <- rbind(
+  copy(sel)[, `:=`(metierL4 = "GTR", daysAtSeaF = daysAtSeaF * 0.69)],
+  copy(sel)[, daysAtSeaF := daysAtSeaF * 0.31]
+)
+
+all1 <- rbind(
+  all1[!(ecoregion == "Bay of Biscay and the Iberian Coast" &
+         metierL4 == "GNS" &
+         country == "PT")],
+  new
+)
+
+fwrite(all1,"data/all1_postcorrection.csv",sep = ";",na="NA")
+
+
+
+```
+
+###############################################################################################################
+## Data cleaning and preparation
+###############################################################################################################
+
+here we call a cleaning function to deal with several data preparation steps:
+
+it ensures that   
+-all variable names are lower case  
+-removes all leading and trailing whitespaces from values in char columns  
+-replaces multiple sequential whitespaces in values in char columns with a single space  
+
+-we replace ISO 2-letter country code to 3-letter code to avoid issues with some country code (eg "SE") that can be confused with function names by some functions  
+-we add vessel_length_group as a variable, relating vessel length categories to 2 levels: below 12m and above 12m  
+-we remove ecoregion that are NA and "north west atlantic"  
+
+for fishing effort (all1) we retain only the last year of the year range (object "years") used in the assessment  
+
+for monitoring (obs1) we reapply the censoring done on the server to remove monitoring context deemed inappropriate by WGBYC (assessment done pre-BEAM)  
+(remove logbook in Portugal, keeping 'other' only in Norway, remove port observer and remove vessel observer from Estonia)  
+This now does not remove anything, but in past years this needed to be done to deal with data which was not censored at the server level.  
+
+for bycatch , we make sure that incidence and number of individuals variables are numerical (potentially fread as character) and then create n_individ summing n_individ with and without pingers and n_incident summing n:incident with and without pingers.  
+
+this creates all2, obs2, and bycatch2  
+
+
+```{r data clean, eval=FALSE}
+source("lib/clean_data.R")
+```
+
+we then generate the list of species from curated lists of species x ecoregion for ICES areas and the Mediterranean sea.it creates soecies_info.csv in the results folder which list species with their taxon and the ecoregion in which they are considered.  
+we then also create obs3 which sums DaS by ecoregion, ices area, country, year, metier level 4, metier level 5, vessellength_group, sampling protocol, and monitoring method. we create bycatch3 by summing the number of individuals by the same combination of variables plus species.  
+we then add to obs3 the number of individuals observed bycaught from bycatch3, expanding obs3 for the relevant ecoregion x species  
+this also tidies up species names as well, deal with a few exceptions with extra spaces and add the variable taxa to obs3  
+obs3 is saved in data folder and available in the workspace  
+
+```{r merge bycatch and monitoring, eval=FALSE}
+source("lib/generate_the_list.R")
+
+
+
+##### 2026 fix to data call 2026 misnomer
+
+obs3$ecoregion[obs3$ecoregion=="arcticocean"]<-"arctic ocean"
+obs3$ecoregion[obs3$ecoregion=="bay of biscay and iberian coast"]<-"bay of biscay and the iberian coast"
+
+keep_eco <- c(
+  "barents sea",
+  "norwegian sea",
+  "icelandic waters",
+  "greenland sea",
+  "arctic ocean"
+)
+
+bpue1 <- bpue1[
+  !(species == "pagophilus groenlandicus" &
+      !ecoregion %in% keep_eco)]
+
+
+
+#############################################################
+
+```
+
+
+cases where taxon_bycatch_monitor_ok is FALSE will not be considered.  
+
+###############################################################################################################
+## BPUE estimation
+###############################################################################################################
+
+we first define the ecoregion x metier level 4 x species cases for which we want to estimate bpue and then call the calc_bpue function to produce bpue1:  
+
+```{r bpue estimate,  eval=FALSE}
+#this is a trial as part o fthe benchmark
+#obs3<-obs3[obs3$ecoregion=="bay of biscay and the iberian coast"&obs3$metierl4=="ptm"&obs3$taxon=="mammals"]
+
+
+
+
+eco_m4_spec <- unique(obs3[, .(ecoregion, metierl4, species)])
+
+bpue1 <- calc_bpue(eco_m4_spec,
+                   cols = c("ecoregion", "metierl4", "species"),
+                   dat = obs3[taxon_bycatch_monitor_ok==TRUE],
+                  include.weights = TRUE)
+fwrite(bpue1, file = "data/bpue1.csv", sep = ";",na="NA")
+
+fwrite(bpue1, file = "data/bpue1_uncensoredlist.csv", sep = ";",na="NA")
+
+###first issue with ecoregion BoB & AO name in new list....
+
+bpue1 <- bpue1[!ecoregion %like% "arcticocean"]
+bpue1 <- bpue1[!ecoregion %like% "bay of biscay and iberian coast"]
+
+keep_eco <- c(
+  "barents sea",
+  "norwegian sea",
+  "icelandic waters",
+  "greenland sea",
+  "arctic ocean"
+)
+
+bpue1 <- bpue1[
+  !(species == "pagophilus groenlandicus" &
+      !ecoregion %in% keep_eco)]
+
+```
+
+before going into the details on calc_bpue, at this stage it is also possible to replicate this process to estimate bpue at different levels (for example at ICES areas or metier level 5 levels). We provide a code chunk below to do so for one example. We currently do not have an automated procedure to decide which ecoregion x metier level 4 x species should instead be estimated at the ICES area scale for example. We had introduced one in 2024, but in plenary discussion in 2025 it became clear that it would be more useful to decide based on a priori knowledge of the species and fisheries instead.  
+
+```{r areabase,eval=FALSE}
+################################################################################
+# For cases where ecoregion-level estimation and prediction is considered 
+# inappropriate, we can go to the areacode level.
+
+#### we want you to think about it for this step, so we kept it manual
+
+obs3_area <- subset(obs3,(ecoregion=="baltic sea"|
+                             ecoregion=="bay of biscay and the iberian coast") &
+                       (taxon=="mammals"))
+
+obs3_area <- subset(obs3,(ecoregion=="bay of biscay and the iberian coast") &
+                        (metierl4=="ptm")&
+                       (taxon=="mammals"))
+
+
+area_m4_spec <- unique(obs3_area[, .(ecoregion, areacode, metierl4, species)])
+
+bpue1_area <- calc_bpue(needle = area_m4_spec, 
+                        cols = c("ecoregion", "areacode", "metierl4", "species"),
+                        dat = obs3_area[taxon_bycatch_monitor_ok==TRUE])
+fwrite(bpue1_area, file = "data/bpue1_area.csv", sep = ";",na="NA")
+
+################################################################################
+bpue2_area <- annotate_bpue(bpue1_area, cols = c("ecoregion", "areacode", "metierl4"))
+fwrite(bpue2_area, file = "data/bpue2_area.csv", sep = ";",na="NA")
+
+```
+
+################################################################################
+################################################################################
+##### 2026 Common Dolphin Case study #####
+
+```{r}
+obs3_area_CD <- subset(obs3,(ecoregion=="bay of biscay and the iberian coast") &
+                       (species=="delphinus delphis"))
+
+area_CD_m4_spec <- unique(obs3_area_CD[, .(ecoregion, areacode, metierl4, species)])
+
+bpue1_area_CD <- calc_bpue(needle = area_CD_m4_spec, 
+                        cols = c("ecoregion", "areacode", "metierl4", "species"),
+                        include.weights = T,
+                        dat = obs3_area_CD[taxon_bycatch_monitor_ok==TRUE])
+
+fwrite(bpue1_area_CD, file = "data/bpue1_area_CD.csv", sep = ";",na="NA")
+
+bpue2_area_CD <- annotate_bpue(bpue1_area_CD, cols = c("ecoregion", "areacode", "metierl4"))
+fwrite(bpue2_area_CD, file = "data/bpue2_area_CD.csv", sep = ";",na="NA")
+```
+
+
+#Total per year and per quarter CD 
+
+```{r}
+
+#Manually creating a weights value here for compatibility with the CIBBRiNA code
+
+obs3_area_CD[, weights := ifelse(year >= (max(years)-4),1,0.5)]
+
+# Calculate totals for CD
+years # Already loaded at the beggining of the walkthrough
+quarters <- 1:4
+
+comb <- expand.grid(quarter = quarters, year = years)
+
+# modify colname for fishing effort
+all_CD <- fread("data/fishing_all_years.csv")
+
+all2_CD <- all_CD
+
+colnames(all2_CD)[13] <- "daysatsea"
+
+tot_CD <- NULL
+for(i in 1:nrow(comb)){
+  print(i)
+  output <- calc_total_CD(bpue = bpue2_area_CD, 
+                          analysis_resolution = c("ecoregion", "areacode", "metierl4", "species"),
+                          dat = obs3_area_CD, # the same that was given to calc_bpue
+                          fishing = all2_CD, 
+                          #verbose = T,
+                          #include.weights = T,
+                          response = "n_ind",
+                          effort_term = "daysatsea", 
+                          #weights_values = "weights",
+                          filter = list(year = comb$year[i], 
+                                        quarter = comb$quarter[i]))
+  tot_CD <- rbind(tot_CD, output)
+}
+
+fwrite(tot_CD, "results/tot_CD.csv")
+
+```
+
+# Reliability checks for CD
+```{r}
+# Using WKMAMBY script for reliability checks, it is a improved version
+
+source("lib/reliability_estimation_wkmamby.r")
+
+```
+
+
+########################################################################################
+#########################################################################################
+
+#### 2026 Baltic work ####
+
+
+```{r areabase,eval=FALSE}
+################################################################################
+# For cases where ecoregion-level estimation and prediction is considered 
+# inappropriate, we can go to the areacode level.
+
+#### we want you to think about it for this step, so we kept it manual
+
+obs3_area <- subset(obs3,(ecoregion=="baltic sea") &
+                       (taxon=="mammals"))
+
+obs3_area <- subset(obs3,(ecoregion=="baltic sea") &
+                       (species =="pusa hispida" | species =="phocoena phocoena"))
+
+
+area_m4_spec <- unique(obs3_area[, .(ecoregion, areacode, metierl4, species)])
+
+bpue1_area <- calc_bpue(needle = area_m4_spec, 
+                        cols = c("ecoregion", "areacode", "metierl4", "species"),
+                        dat = obs3_area[taxon_bycatch_monitor_ok==TRUE])
+
+#fwrite(bpue1_area, file = "data/bpue1_area.csv", sep = ";",na="NA")
+
+################################################################################
+bpue2_area <- annotate_bpue(bpue1_area, cols = c("ecoregion", "areacode", "metierl4"))
+
+#fwrite(bpue2_area, file = "data/bpue2_area.csv", sep = ";",na="NA")
+
+```
+
+
+metier L5 level analysis
+
+```{r metier base,eval=FALSE}
+################################################################################
+# For cases where ecoregion-level estimation and prediction is considered 
+# inappropriate, we can go to the areacode level.
+
+#### we want you to think about it for this step, so we kept it manual
+
+obs3_l5 <- subset(obs3,(ecoregion=="baltic sea"|
+                             ecoregion=="bay of biscay and the iberian coast") &
+                       (taxon=="mammals"))
+
+area_m4_spec <- unique(obs3_l5[, .(ecoregion, metierl4, metierl5, species)])
+
+bpue1_l5 <- calc_bpue(needle = area_m4_spec, 
+                        cols = c("ecoregion", "metierl4", "metierl5","species"),
+                        dat = obs3_l5[taxon_bycatch_monitor_ok==TRUE])
+fwrite(bpue1_l5, file = "data/bpue1_l5.csv", sep = ";",na="NA")
+
+################################################################################
+bpue2_l5 <- annotate_bpue(bpue1_l5, cols = c("ecoregion", "metierl4","metierl5"))
+fwrite(bpue2_l5, file = "data/bpue2_l5.csv", sep = ";",na="NA")
+
+```
+
+
+## how calc_bpue works:
+
+calc_bpue takes monitored fishing effort data obtained in the ICES WGBYC annual data call, and uses those data to generate a number of models of varying complexity. It then compares those models using AIC, and returns the best model.  
+
+details: If there are multiple rows in `needle`, each row is processed separately, and rbind'ed into one data.table with nrow equal to the number of rows in `needle`. If a parallel backend is available, the code will execute in parallel, allowing faster computations.  
+ 
+param: needle data.table with values for `cols`, used to subset observations from `dat`. Any additional columns in `needle` are disregarded.  
+param: cols columns, whose unique combinations, are used to split the data given in `dat`  
+param: min_re_obs Integer specifying the minimum number of levels needed to include a term as a random effect  
+param: dat data.table with monitored fishing effort data (e.g. since 2017)  
+
+returns: A data.table with one row for each row in `needle` and all columns given in `cols`, plus additional columns showing the final model formula, BPUE estimates, lower and upper confidence intervals, and a logical indicating model heterogeneity in the base model (I^2). See details.  
+
+ 
+if there is only one row then:  
+
+```{r bpue 1row, eval=FALSE}
+#code snippet from calc_bpue
+      bpue <- dat$n_ind / dat$daysatsea
+      lwr <- bpue -1.96 * sqrt(dat$n_ind / dat$daysatsea^2)
+      upr <- bpue +1.96 * sqrt(dat$n_ind / dat$daysatsea^2)
+```
+
+if we have 'replicates', we test for heterogeniety between BPUEs
+
+```{r heterogeneity test, eval=FALSE}
+#code snippet from cal_bpue
+rma.glmm(xi = n_ind, ti = daysatsea, measure = "IRLN", data = dat)$QEp.Wld<0.05
+
+
+
+```
+
+note here that we are liberal in heterogeneity identification, with multiple testing we should lower the p value, but here we felt it was more conservative to retain 0.05 to push to the "heterogeneous BPUE" branch any inkling of heterogeneity.  
+
+if we have less than 5 replicates, the best model remains the base model. note that if the case has bpue heterogeneity, then we stop there and this becomes a case for hich we cannot produce a BPUE estimate (see later QC steps).
+
+```{r BPUE base model, eval=FALSE}
+#code snippet from calc_bpue
+#base model:
+glmmTMB(n_ind ~ 1, offset = logDAS, family = nbinom2, data = dat)
+```
+
+if we have more than 5 replicates, we engage with model selection
+```{r bpue model selection, eval=FALSE}
+#code snippet from calc_bpue
+        candidates <- apply(re.i, 1, function(i) {
+            
+            if (all(i == FALSE)) {
+                return(base_model)
+            }
+            re <- sprintf("(1|%s)", re[unlist(i)])
+            form <- sprintf("n_ind ~ 1 + %s", paste(re, collapse = " + "))
+            form <- as.formula(form)
+            # wrapped this in suppressMessages just to avoid cluttering of the console when running glmmTMB, errors and warnings are still caught by tryCatch.
+            suppressMessages(tryCatch(glmmTMB(formula = form, offset = logDAS, family = nbinom2, data = dat), error = function(e) e$message, warning = function(w) w$message))
+```
+
+here we reject any convergence issues, it is likely that some model could be run by increasing iterations or tolerance in the likelihood estimation process, but this approach provides us with a conservative rejection of cases where bpue variance cannot be clearly explained by the variables considered.  
+candidates are then the fitted models and we use AIC to delect the one retained to explain BPUE.  
+
+Note: this modelling approach will be reviewed in later implementation of BEAM. we have at the moment tested a fixed effect approach as well, and we obtained similar outcomes to this one.  
+
+we retain the formula of the best model.  
+
+
+we then bring back information in bpue1 to create bpue2 adding for each case fishing effort, monitoring coverage (monitoring DaS/fishing efffort DaS), and number of individuals bycaught  
+
+```{r annotate bpue1, eval=FALSE}
+bpue2 <- annotate_bpue(bpue1, cols = c("ecoregion", "metierl4"))
+fwrite(bpue2, file = "data/bpue2.csv", sep = ";",na="NA")
+```
+
+##############################
+### can we qualify monitored zero bycatch events?
+##############################
+
+This step was introduced during the benchmark in Dec 2025 (see WKBBEAM report). Here we attempt to estimate whether we are comfortable with instances when we have no bycatch events monitored. That is, we aim to estimate whether the probability that a bycatch would have occurred but was not monitored is low. We tested varying approaches during the benchmark to achieve this. Here we assume that we would like to be sure that we are able to detect very rare bycatch (BPUE = 0.001) and that we do that with virtual certainty (probability of 0.01 that we observe no bycatch given the monitoring effort spent and the true BPUE is 0.001).
+If a case meets this requirement then BPUE is estimated to by zero with a lower confidence interval of zero and an upper confidence interval estimated using a parametric approach (adjusted Wald method) and the bycatch estimate is zero.
+
+
+```{r zero assessments, eval=FALSE}
+#bpue1 <- fread("data/bpue1.csv")
+#bpue2 <- fread("data/bpue2.csv")
+source("lib/zeros_assessment.R")
+zero_assessments(bpue2=bpue2,bpue1=bpue1)
+
+```
+
+###############################################################################################################
+## Bycatch estimation
+###############################################################################################################
+
+we then attempt to predict the total bycatch that would result from the observed fishing effort that year given the estimated BPUE(s)  
+
+```{r, eval=FALSE}
+bpue1 <- fread("data/bpue1.csv")
+```
+
+
+```{r total bycatch, eval=FALSE}
+tot1 <- vector(mode = "list", length = nrow(bpue1))
+
+for (i in 1:nrow(bpue1)) {
+    cat("\rProcessing row ", i, "/", nrow(bpue1), sep="")
+    tot1[[i]] <- calc_total(bpue1[i],
+                            obs = obs3[taxon_bycatch_monitor_ok==TRUE], 
+                            all = all2, 
+                            years = years,
+                            verbose = FALSE)
+}
+tot1 <- rbindlist(tot1)
+fwrite(tot1, file = "data/tot1.csv", sep = ";",na="NA")
+
+```
+
+#############################################################################
+
+
+
+
+
+
+
+```{r sandbox, eval=FALSE}
+#######
+##### sandbox
+
+data<-obs3[obs3$species == "alosa fallax",]
+
+data$fishdays<-rpois(nrow(data),1000)
+glm0
+
+p <- ggpredict(model = glm0,terms=data.frame(country="swe"&year="2023"),
+                           condition = c(logDAS = log(data$fishdays),
+                           type = "random",
+                           interval = "confidence",
+                           verbose = verbose)
+
+###########
+##########
+```
+this can be done at an ICES area scale too
+
+```{r total bycatch area, eval=FALSE}
+
+# example of how to use calc_total to estimate bycatch at the ICES area scale
+
+tot1_area <- vector(mode = "list", length = nrow(bpue1_area))
+
+for (i in 1:nrow(bpue1_area)) {
+    cat("\rProcessing row ", i, "/", nrow(bpue1_area), sep="")
+    tot1_area[[i]] <- calc_total(bpue1_area[i],
+                            obs = obs3_area[taxon_bycatch_monitor_ok==TRUE], 
+                            all = all2, 
+                            cols = c("ecoregion","areacode", "metierl4", "species"),
+                            verbose = TRUE)
+}
+tot1_area <- rbindlist(tot1_area)
+fwrite(tot1_area, file = "data/tot1.csv", sep = ";",na="NA")
+
+tot1_area_dd<-tot1_area[species=="delphinus delphis"]
+fwrite(tot1_area_dd, file = "data/tot1_area_bob_dd.csv", sep = ";",na="NA")
+
+```
+
+
+At its core, calc_total refit the best model for BPUE, then assess whether all the levels in all2 for the random effects included in the best model have been monitored, and if so predict bycatch for the log DaS of the fishing effort that was observed  
+
+```{r calc_total snippet, eval=FALSE}
+##snippet from calc_total
+
+if (any(sapply(re, function(re) !all(tot[[re]] %in% unique(obs[[re]]))))) {
+        ret$message <- "levels for at least one random effect not ok"
+        return(ret)
+    }
+    
+    best <- glmmTMB(formula = form, offset = logDAS, family = nbinom2, data = obs)
+
+    if (re.n == 0) {
+
+        pred <- as.data.frame(emmeans(best, ~1, offset = tot$logDAS, type = "response"))
+        ret[, c("tot_mean", "tot_lwr", "tot_upr") := as.list(pred[, c("response", "asymp.LCL", "asymp.UCL")])]
+        ret$fishing_effort <- sum(tot$das)
+        
+    } else {
+        
+        tot[, (re) := lapply(.SD, as.factor), .SDcols = re] 
+        
+        pred <- lapply(1:nrow(tot), function(i) {
+          type_arg <- ifelse(packageVersion("ggeffects") >= "2.0.0", "random", "re")
+           
+          p <- ggpredict(model = best,
+                           terms = tot[i, ..re],
+                           condition = c(logDAS = tot$logDAS[i]),
+                           type = type_arg,
+                           interval = "confidence",
+                           verbose = verbose)
+         
+            p <- as.data.frame(p) 
+            data.table(mean = p$predicted,
+                       lwr = ifelse(!is.null(p[["conf.low"]]), p[["conf.low"]], NA_real_),
+                       upr = ifelse(!is.null(p[["conf.high"]]), p[["conf.high"]], NA_real_))
+        }) |> rbindlist()
+
+        ret[, c("tot_mean", "tot_lwr", "tot_upr") := as.list(colSums(pred))]
+        ret$fishing_effort <- sum(tot$das)
+        
+    }
+    
+```
+
+###############################################################################################################
+## Quality control
+###############################################################################################################
+
+Here we assign colour codes to different quality checks  
+
+ QC1 - MONITORING EFFORT VS FISHING EFFORT -------------------------------  
+ More monitoring effort than fishing effort (*if dbsg was done correctly this should not be a problem)  
+ Could happen that when there are simultaneous monitoring (e.g., EM and SO)  
+ Green = no, fishing effort >= monitoring effort  
+ Red = yes, monitoring effort > fishing effort  
+  
+ QC2 - DATA AVAILABILITY FOR TOTAL BYCATCH ESTIMATION --------------------  
+ Data availability to calculate total BPUE by ecoregion, metier lvl 4 and species  
+ Green = if there is both monitoring effort and total fishing effort  
+ Yellow = if there is NO fishing effort but YES monitoring effort  
+ Red = if there is NO monitoring effort and NO total fishing effort  
+
+ QC3 - FACTORS INFLUENCING BPUE (RE RETAINED IN THE MODEL) ---------------  
+ Factors influencing BPUE (random effects retained in the model)  
+ If there is any factor influencing BPUE, do   
+   we have all the levels of the effect (e.g., no BPUE for one country)?  
+ Green = yes, all levels of the factor retained are available  
+ Yellow = not all levels available, but random effect is year  
+ Red = no, no all levels of the factor are available (except when the RE is year) OR sampling protocol does not match monitoring method  
+ *tb.message reflects this
+
+
+this creates total_bycatch with this information and saved as total_bycatch_QCs.csv in the results folder with this information
+
+```{r QC,eval=FALSE}
+tot2<-tot1
+source("lib/QCs_TotalBycatch.R")
+source("lib/add_qc123.R")
+total_bycatch <- add_qc123(tot = tot1, obs = obs3, all = all2, cols = c("ecoregion", "year", "country", "metierl4", "metierl5"), year_ass = (year(Sys.Date())-1))
+fwrite(total_bycatch, "data/final_beam_table.csv",na="NA")
+
+
+```
+
+
+note further work takes place in WGBYC ToR E to synthesis information about context for cases for which we can produce a BPUE or a Bycatch estimate or not.
+
+
+###############################################################################################################
+## Presenting and visualising results
+###############################################################################################################
+
+
+First we try to assess whether we have a bycatch estimate for all metiers at level 4 to which the species is sensitive for bycatch:
+
+```{r complete bycatch, eval=FALSE}
+
+##here we create the risk table dynamically, accounting for the species list update and new monitoring
+
+source("lib/risktable_making.R")
+all.metier<-risktable_making(bycatch1,ecoreg_species)
+#all.metier<-fread("data/ecoregion_metier_sps_risk_bycatch_2023.csv")
+
+#all.metier contains for each ecoregion x species a list of all metiers in which the species has been recorded as bycaught in any ecoregions and for which the metiers have fishing effort in the ecoregion of interest
+
+all.metier$species<-tolower(all.metier$species)
+all.metier$ecoregion<-tolower(all.metier$ecoregion)
+THEDATA<-obs3
+
+total_bycatch$complete<-"no"
+total_bycatch$missing<-0
+
+whole.bycatch.df<-data.frame(ecoregion=total_bycatch$ecoregion[!duplicated(total_bycatch[,c(1,3)])],species=total_bycatch$species[!duplicated(total_bycatch[,c(1,3)])])
+
+total_bycatch.sub<-subset(total_bycatch,!is.na(tot_mean))
+
+for (i in 1:nrow(whole.bycatch.df)) {
+
+fished<-all.metier$metierL4[all.metier$ecoregion==whole.bycatch.df$ecoregion[i] &all.metier$species==whole.bycatch.df$species[i]] 
+tb<-total_bycatch.sub$metierl4[total_bycatch.sub$ecoregion==whole.bycatch.df$ecoregion[i] &total_bycatch.sub$species==whole.bycatch.df$species[i]] 
+fished<-fished[!is.na(fished)]
+
+if (all(fished%in%tb)==TRUE) {
+total_bycatch$complete[total_bycatch$ecoregion==whole.bycatch.df$ecoregion[i] &total_bycatch$species==whole.bycatch.df$species[i]] <-"yes"
+
+}
+total_bycatch$missing[total_bycatch$ecoregion==whole.bycatch.df$ecoregion[i] &total_bycatch$species==whole.bycatch.df$species[i]] <-sum((fished%in%tb)==FALSE)
+
+
+}
+
+complete_tb<-total_bycatch[!is.na(total_bycatch$tot_mean)&total_bycatch$complete=="yes",]
+
+fwrite(complete_tb,"results/cases_with_complete_total_bycatch.csv",na="NA")
+fwrite(total_bycatch,"results/cases_with_total_bycatch.csv",na="NA")
+
+
+```
+
+we then have a function to produce figures and tables of total estimates all saved in the results section:
+
+```{r visualise summary, eval=FALSE}
+endyear<-2025 #this is altered for the benchmark data
+
+#summaryyear<-aggregate(cbind(n_ind,daysatsea)~ecoregion+metierl4+species,sum,data=obs3[taxon_bycatch_monitor_ok==TRUE&year==(year(Sys.Date())-1)] )
+summaryyear<-aggregate(cbind(n_ind,daysatsea)~ecoregion+metierl4+species,sum,data=obs3[taxon_bycatch_monitor_ok==TRUE&year==endyear] )
+summaryall<-aggregate(cbind(n_ind,daysatsea)~ecoregion+metierl4+species,sum,data=obs3[taxon_bycatch_monitor_ok==TRUE] )
+
+names(summaryall)[4:5]<-c("n_ind_all","daysatsea_all")
+
+#produce main table to print and bycatch estimate figures by taxon
+source("lib/produce_table_and_overall_figures.R")
+
+#postestimate_qa
+
+```
+
+
+###############################################################################################################
+## Reliability measures - added September 2025
+###############################################################################################################
+
+
+here we try to provide some posthoc insight about the usefulness of the mean estimate when a bycatch estimate can be produced. This does not speak to the validity of the bycatch estimate, but simply tries to captures statistical notions that may be hard to interpret if users only focus on the mean estimate. we focus on two dimensions of reliability for the mean estimate.   
+The first one captures the information conveyed by the breadth of the confidence interval; its uncertainty. We simply colour code estimates for which the confidence interval is more than two orders of magnitude as an estimate to be less reliable (in that the mean estimate does not tell us much about the likely true value of the total bycatch that occurred).  
+The second one captures a notion of robustness of the estimates. We used a leave-one-out jackknifing approach to reestimate BPUEs for the cases when we could produce a total bycatch estimate. Given n replicates for a given model, we therefore fitted n models and obtained n jackknifed BPUE estimates. we use a RMSE approach to compare the jackknife BPUE estimate to the "observed" BPUE estimate. We used the log of the estimate ratios.  
+
+```{r reliability,eval=FALSE}
+
+library(glmmTMB)
+library(ggeffects)
+library(emmeans)
+library(data.table)
+
+##bpue_estimates
+full_data <-obs3
+bpues_estimates <-bpue1
+
+source("lib/reliability_estimation_wkmamby.R")
+
+
+
+tot_reliability <- tot1
+
+tot_reliability[bpues_estimates,
+                on = .(ecoregion, metierl4, species),
+                reliability_rmse := i.reliability_rmse]
+
+tot_reliability$tot_lwr_log <- log10(tot_reliability$tot_lwr+1)
+tot_reliability$tot_upr_log<-log10(tot_reliability$tot_upr+1)
+tot_reliability$delta<-tot_reliability$tot_upr_log-tot_reliability$tot_lwr_log
+
+tot_reliability$reliability_CI <- tot_reliability$delta < 2
+
+monitoring_cutoff <- bpue2
+monitoring_cutoff$monitoring_coverage <- monitoring_cutoff$daysatsea/monitoring_cutoff$daysatseaf
+
+tot_reliability[monitoring_cutoff,
+                on = .(ecoregion, metierl4, species),
+                monitoring_coverage := i.monitoring_coverage]
+
+tot_reliability$reliability_coverage <- tot_reliability$monitoring_coverage > 0.001
+
+tot_reliability$overall_reliability <- tot_reliability$reliability_CI == TRUE & tot_reliability$reliability_rmse == TRUE & tot_reliability$reliability_coverage ==TRUE
+
+#Need to bring in the zeros ?
+
+tot_reliability[tot_mean == 0, overall_reliability := TRUE]
+
+fwrite(tot_reliability, "results/tot_reliability.csv")
+
+
+```
+
+
+
+
+we also produce legacy plots about rates of achieved estimations, those are plots which were used in previous reports but replaced by better visualisation produced in the function "Data_viz.R" in 2025
+
+WE NO LONGER DO THAT
+```{r visualise legacy, eval=FALSE}
+#source("lib/legacy_achievement_plots.R")
+
+```
+
+
+```{r visualise, eval=FALSE}
+library(tidyverse)
+library(EnvStats)
+library(ggalluvial)
+library(colorspace)
+
+#Prepares a new dataset for data visualisation, capturing failed checks along the way instead of discarding the data. Saves as new files in /data
+source("lib/Data_viz_data_prep.R")
+#Produces a series of figures showing effort suitability, availability of bycatch records, and ability to generate a BPUE across ecoregion, metier and taxon, saved in /results
+source("lib/Data_viz.R")
+
+#Interactive flow chart for sample retention through BEAM
+
+
+library(shiny)
+runApp("lib/Sample_retention_BEAM_flow_chart_2025.R")
+
+```
+
+
+all plots are saved in the results folder
+
+
+###############################################################################################################
+## Reliability measures - added September 2025
+###############################################################################################################
+
+
+here we try to provide some posthoc insight about the usefulness of the mean estimate when a bycatch estimate can be produced. This does not speak to the validity of the bycatch estimate, but simply tries to captures statistical notions that may be hard to interpret if users only focus on the mean estimate. we focus on two dimensions of reliability for the mean estimate.   
+The first one captures the information conveyed by the breadth of the confidence interval; its uncertainty. We simply colour code estimates for which the confidence interval is more than two orders of magnitude as an estimate to be less reliable (in that the mean estimate does not tell us much about the likely true value of the total bycatch that occurred).  
+The second one captures a notion of robustness of the estimates. We used a leave-one-out jackknifing approach to reestimate BPUEs for the cases when we could produce a total bycatch estimate. Given n replicates for a given model, we therefore fitted n models and obtained n jackknifed BPUE estimates. we use a RMSE approach to compare the jackknife BPUE estimate to the "observed" BPUE estimate. We used the log of the estimate ratios.  
+
+```{r reliability,eval=FALSE}
+
+library(glmmTMB)
+library(ggeffects)
+library(emmeans)
+library(data.table)
+
+source("lib/reliability_estimation_p.R")
+
+```
+
+```{r reliability measures, eval=FALSE}
+#code snippet from reliability_estimation.R to see how logRMSE is computed and used
+
+#code in rmse_estimator function
+diffs[j] <- sum((log1p(full_pred$predicted)-log1p(jack_pred$predicted))^2, 
+                        na.rm = T)/nrow(full_pred) #for cases when we have multiple BPUEs estimated for a case depending on variable(s) levels
+rmses[i] <<- sqrt(sum(diffs, na.rm=TRUE)/(nrow(full_data_subset)-1))
+
+#...
+
+bpues_estimates$RMSE<-rmse_estimator(full_data = full_data,
+                     bpues_estimates = bpues_estimates)
+
+
+# Transform back from log scale
+bpues_estimates$factor <- exp(bpues_estimates$RMSE)
+
+# The lower limit of the 68% interval is: 100(1-1/factor) # in percentage
+bpues_estimates$lower_factor_prop <- 100*(1-1/bpues_estimates$factor)
+# The upper limit of the 68% interval is: 100(factor−1) # in percentage
+bpues_estimates$upper_factor_prop <- 100*(bpues_estimates$factor-1)
+
+# we take an arbitrary threshold on 25%
+bpues_estimates$reliability <- bpues_estimates$lower_factor_prop <= 25 & bpues_estimates$upper_factor_prop <= 25
+
+
+```
+
+this produces bpues_estimates saved as bpue_table_print_reliability_subset.csv in results folder  
+
+We invite readers to read ICES WGBYC 2025 report for case studies which helps to understand this a bit more. We will aim to run through some of those case studies during the benchmark process.
+
+
+we then merge this information back in the table which is then produced online as a html table (thanks to Carlos Pinto for producing it)
+
+```{r production of final table for reporting, eval=FALSE}
+
+bpues_estimates$reliability2<-FALSE
+bpues_estimates$reliability2[bpues_estimates$delta<2&bpues_estimates$upper_factor_prop <= 25&bpues_estimates$lower_factor_prop <= 25]<-TRUE
+
+temp<-merge(table.print,bpues_estimates,by.x=c("ecoregion","metierl4","species"),by.y=c("Ecoregion","metier L4","Species"),all.x=TRUE)
+
+#We are now adding a color flag based on a bivariate scale combining information on reliability and monitoring coverage. The color column contain the HEX code for plotting, and the flag_description column indicates what the color means (e.g. uncertain estimate and low monitoring, more reliable estimate and monitoring above satisfactory theshold...)
+
+table.print$reliability<-FALSE
+table.print$reliability[which(temp$reliability2==TRUE)]<-TRUE
+
+table.print <- add_color_flag(table.print, bpue2) #Uses monitoring coverage from bpue2 and reliability info present in table.print
+
+#Convert TRUE/FALSE to qualifiers for printing
+table.print$reliability <- ifelse(
+  table.print$reliability,
+  "more reliable",
+  "uncertain"
+)
+
+#We are also flagging species of bycatch relevance - assessed in BEAM - that are known to be commerically landed in some ecoregions.
+
+table.print <- add_landing_flag(table.print)
+
+fwrite(table.print,file="results/bpue_table_print.csv",na="NA")
+
+fwrite(subset(table.print,reliability=="more reliable"),file="results/table_reliable_estimates.csv",na="NA")
+
+
+```
+
+
+
+Here we can also run it at the ices area and metier level 5 levels
+########################################################
+### cases we want to run
+#######################################################
+```{r get data subscale, eval=FALSE}
+## these are hand curated, you can see that you do not find this data file produced in the code above
+icesarea<-fread("data/cases_with_total_bycatch_area_mammals.csv")
+L5<-fread("data/cases_with_total_bycatch_L5_mammals.csv")
+icesareacases<-icesarea[!is.na(icesarea$tot_mean)&icesarea$taxa=="mammals",]
+L5cases<-L5[!is.na(L5$tot_mean)&L5$taxa=="mammals",]
+
+```
+
+
+```{r reliability in function, eval=FALSE}
+
+source("lib/reliability_estimation_p_ready.r")
+
+realibility_general(obs3=obs3_area,bpues=bpue1_area,cols = c("ecoregion", "areacode","metierl4", "species"),fileoutput="results/bpue_table_print_reliability_subset_area.csv")
+
+realiabilitydf<-fread("results/bpue_table_print_reliability_subset_area.csv")
+
+icesareacases[realiabilitydf, on = c("ecoregion","areacode","metierl4","species"), reliability := i.reliability]
+icesareacases$delta<-log10(icesareacases$tot_upr+1)-log10(icesareacases$tot_lwr+1)
+
+icesareacases$reliability2<-FALSE
+icesareacases$reliability2[icesareacases$reliability==TRUE&icesareacases$delta<2]<-TRUE
+
+#Adding the color flag at this point.
+
+#The column output from reliability2 needs to be called reliability as in the example above at the ecoregion x metierl4 scale.
+
+icesareacases$reliability <- icesareacases$reliability2 
+
+icesareacases <- add_color_flag(icesareacases, bpue2_area) #Uses monitoring coverage from bpue2_area and reliability info present in icesareacases
+
+#Convert TRUE/FALSE to qualifiers
+icesareacases$reliability <- ifelse(
+  icesareacases$reliability,
+  "more reliable",
+  "uncertain"
+)
+
+fwrite(icesareacases,file="results/icesareacases.csv")
+
+#########
+
+realibility_general(obs3=obs3_l5,bpues=bpue1_l5,cols = c("ecoregion","metierl4","metierl5", "species"),fileoutput="results/bpue_table_print_reliability_subset_l5.csv")
+
+realiabilitydf<-fread("results/bpue_table_print_reliability_subset_l5.csv")
+
+L5cases[realiabilitydf, on = c("ecoregion","metierl4","metierl5","species"), reliability := i.reliability]
+L5cases$delta<-log10(L5cases$tot_upr+1)-log10(L5cases$tot_lwr+1)
+
+L5cases$reliability2<-FALSE
+L5cases$reliability2[L5cases$reliability==TRUE&L5cases$delta<2]<-TRUE
+
+#Adding the color flag at this point.
+
+#The column output from reliability2 needs to be called reliability as in the example above at the ecoregion x metierl4 scale.
+
+L5cases$reliability <- L5cases$reliability2 
+
+L5cases <- add_color_flag(L5cases, bpue2_L5) #Uses monitoring coverage from bpue2_L5 and reliability info present in L5cases
+
+#Convert TRUE/FALSE to qualifiers
+L5cases$reliability <- ifelse(
+  L5cases$reliability,
+  "more reliable",
+  "uncertain"
+)
+
+
+fwrite(L5cases,file="results/L5cases.csv")
+
+```
+
+
+
+
+
+
+
+
+###############################################################################################################
+## Reliability visualisation - added September 2025
+###############################################################################################################
+
+
+last we plot the total bycatch estimates for species x ecoregion x metier level 4 that have passed the reliability checks. we produce 3 types of plots:  
+1. full plot with confidence bands in orange for the 'less reliable' estimates  
+2. subset of only more reliable estimates  
+3. subset of only more reliable estimates ordered by bycatch estimates (plotted below)  
+
+
+
+## mammals retained post reliability checks  
+```{r, eval=FALSE, echo=FALSE, out.width="90%"}
+knitr::include_graphics("results/totalbycatch_mammals_reliability_check_ordered.png")
+```
+  
+  
+  
+## birds retained post reliability checks  
+```{r, eval=FALSE, echo=FALSE, out.width="90%"}
+knitr::include_graphics("results/totalbycatch_seabirds_reliability_check_ordered.png")
+```
+  
+  
+    
+## turtles retained post reliability checks  
+```{r, eval=FALSE, echo=FALSE, out.width="90%"}
+knitr::include_graphics("results/totalbycatch_turtles_reliability_check_ordered.png")
+```
+  
+    
+    
+## elasmobranchs retained post reliability checks  
+```{r, eval=FALSE, echo=FALSE, out.width="90%"}
+knitr::include_graphics("results/totalbycatch_elasmobranchs_reliability_check_ordered.png")
+```
+  
+  
+ 
+## fish retained post reliability checks  
+```{r, eval=FALSE, echo=FALSE, out.width="90%"}
+knitr::include_graphics("results/totalbycatch_fish_reliability_check_ordered.png")
+```
+
+
+
+
+
+
+
