@@ -88,7 +88,7 @@ calc_bpue <- function(needle, cols = colnames(needle), min_re_obs = 2, dat, year
         bpue <- dat$n_ind / dat$daysatsea
         lwr <- bpue -1.96 * sqrt(dat$n_ind / dat$daysatsea^2)
         upr <- bpue +1.96 * sqrt(dat$n_ind / dat$daysatsea^2)
-        ret[, c("bpue", "lwr", "upr", "model") := list(bpue, lwr, upr, "only one")]
+        ret[, c("model", "bpue", "lwr", "upr", "replicates", "base_model_heterogeneity", "alternative_models_flag") := list("only one", ..bpue, ..lwr, ..upr, nrow(dat), NA_real_,NA_real_)]
         return(ret)
     }
     

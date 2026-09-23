@@ -406,6 +406,15 @@ fwrite(tot_CD, "results/tot_CD.csv")
 
 ```
 
+# Reliability checks for CD
+```{r}
+# Using WKMAMBY script for reliability checks, it is a improved version
+
+source("lib/reliability_estimation_wkmamby.r")
+
+```
+
+
 ########################################################################################
 #########################################################################################
 
