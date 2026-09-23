@@ -265,6 +265,25 @@ bpue1 <- calc_bpue(eco_m4_spec,
                   include.weights = TRUE)
 fwrite(bpue1, file = "data/bpue1.csv", sep = ";",na="NA")
 
+fwrite(bpue1, file = "data/bpue1_uncensoredlist.csv", sep = ";",na="NA")
+
+###first issue with ecoregion BoB & AO name in new list....
+
+bpue1 <- bpue1[!ecoregion %like% "arcticocean"]
+bpue1 <- bpue1[!ecoregion %like% "bay of biscay and iberian coast"]
+
+keep_eco <- c(
+  "barents sea",
+  "norwegian sea",
+  "icelandic waters",
+  "greenland sea",
+  "arctic ocean"
+)
+
+bpue1 <- bpue1[
+  !(species == "pagophilus groenlandicus" &
+      !ecoregion %in% keep_eco)]
+
 ```
 
 before going into the details on calc_bpue, at this stage it is also possible to replicate this process to estimate bpue at different levels (for example at ICES areas or metier level 5 levels). We provide a code chunk below to do so for one example. We currently do not have an automated procedure to decide which ecoregion x metier level 4 x species should instead be estimated at the ICES area scale for example. We had introduced one in 2024, but in plenary discussion in 2025 it became clear that it would be more useful to decide based on a priori knowledge of the species and fisheries instead.  
@@ -298,7 +317,8 @@ fwrite(bpue2_area, file = "data/bpue2_area.csv", sep = ";",na="NA")
 
 ```
 
-
+################################################################################
+################################################################################
 ##### 2026 Common Dolphin Case study #####
 
 ```{r}
@@ -361,6 +381,8 @@ fwrite(tot_CD, "results/tot_CD.csv")
 
 ```
 
+########################################################################################
+#########################################################################################
 
 #### 2026 Baltic work ####
 
@@ -504,9 +526,10 @@ If a case meets this requirement then BPUE is estimated to by zero with a lower 
 
 
 ```{r zero assessments, eval=FALSE}
-bpue1 <- fread("data/bpue1.csv")
-bpue2 <- fread("data/bpue2.csv")
-zero_assessments()
+#bpue1 <- fread("data/bpue1.csv")
+#bpue2 <- fread("data/bpue2.csv")
+source("lib/zeros_assessment.R")
+zero_assessments(bpue2=bpue2,bpue1=bpue1)
 
 ```
 
@@ -536,6 +559,13 @@ tot1 <- rbindlist(tot1)
 fwrite(tot1, file = "data/tot1.csv", sep = ";",na="NA")
 
 ```
+
+#############################################################################
+
+
+
+
+
 
 
 ```{r sandbox, eval=FALSE}
@@ -660,7 +690,7 @@ this creates total_bycatch with this information and saved as total_bycatch_QCs.
 tot2<-tot1
 source("lib/QCs_TotalBycatch.R")
 source("lib/add_qc123.R")
-total_bycatch <- add_qc123(tot = tot1, obs = obs3, all = all2, cols = c("ecoregion", "year", "country", "metierl4", "metierl5"), year = (year(Sys.Date())-1))
+total_bycatch <- add_qc123(tot = tot1, obs = obs3, all = all2, cols = c("ecoregion", "year", "country", "metierl4", "metierl5"), year_ass = (year(Sys.Date())-1))
 fwrite(total_bycatch, "data/final_beam_table.csv",na="NA")
 
 
@@ -739,6 +769,32 @@ source("lib/produce_table_and_overall_figures.R")
 
 ```
 
+
+###############################################################################################################
+## Reliability measures - added September 2025
+###############################################################################################################
+
+
+here we try to provide some posthoc insight about the usefulness of the mean estimate when a bycatch estimate can be produced. This does not speak to the validity of the bycatch estimate, but simply tries to captures statistical notions that may be hard to interpret if users only focus on the mean estimate. we focus on two dimensions of reliability for the mean estimate.   
+The first one captures the information conveyed by the breadth of the confidence interval; its uncertainty. We simply colour code estimates for which the confidence interval is more than two orders of magnitude as an estimate to be less reliable (in that the mean estimate does not tell us much about the likely true value of the total bycatch that occurred).  
+The second one captures a notion of robustness of the estimates. We used a leave-one-out jackknifing approach to reestimate BPUEs for the cases when we could produce a total bycatch estimate. Given n replicates for a given model, we therefore fitted n models and obtained n jackknifed BPUE estimates. we use a RMSE approach to compare the jackknife BPUE estimate to the "observed" BPUE estimate. We used the log of the estimate ratios.  
+
+```{r reliability,eval=FALSE}
+
+library(glmmTMB)
+library(ggeffects)
+library(emmeans)
+library(data.table)
+
+##bpue_estimates
+
+
+source("lib/reliability_estimation_p.R")
+```
+
+
+
+
 we also produce legacy plots about rates of achieved estimations, those are plots which were used in previous reports but replaced by better visualisation produced in the function "Data_viz.R" in 2025
 
 WE NO LONGER DO THAT
@@ -788,6 +844,7 @@ library(emmeans)
 library(data.table)
 
 source("lib/reliability_estimation_p.R")
+
 ```
 
 ```{r reliability measures, eval=FALSE}
