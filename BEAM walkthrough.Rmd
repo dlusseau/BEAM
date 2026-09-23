@@ -245,6 +245,8 @@ we then also create obs3 which sums DaS by ecoregion, ices area, country, year, 
 we then add to obs3 the number of individuals observed bycaught from bycatch3, expanding obs3 for the relevant ecoregion x species  
 this also tidies up species names as well, deal with a few exceptions with extra spaces and add the variable taxa to obs3  
 obs3 is saved in data folder and available in the workspace  
+Note: this requires a ftp-connection, so it may not work with a government VPN: try turning it off
+
 
 ```{r merge bycatch and monitoring, eval=FALSE}
 source("lib/generate_the_list.R")
@@ -355,7 +357,8 @@ area_CD_m4_spec <- unique(obs3_area_CD[, .(ecoregion, areacode, metierl4, specie
 bpue1_area_CD <- calc_bpue(needle = area_CD_m4_spec, 
                         cols = c("ecoregion", "areacode", "metierl4", "species"),
                         include.weights = T,
-                        dat = obs3_area_CD[taxon_bycatch_monitor_ok==TRUE])
+                        dat = obs3_area_CD[taxon_bycatch_monitor_ok==TRUE],
+                        years = years)
 
 fwrite(bpue1_area_CD, file = "data/bpue1_area_CD.csv", sep = ";",na="NA")
 
@@ -368,8 +371,9 @@ fwrite(bpue2_area_CD, file = "data/bpue2_area_CD.csv", sep = ";",na="NA")
 
 ```{r}
 
-#Manually creating a weights value here for compatibility with the CIBBRiNA code
+source("lib/calc_total_CD.R")
 
+#Manually creating a weights value here for compatibility with the CIBBRiNA code
 obs3_area_CD[, weights := ifelse(year >= (max(years)-4),1,0.5)]
 
 # Calculate totals for CD
