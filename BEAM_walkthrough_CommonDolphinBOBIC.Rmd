@@ -389,3 +389,46 @@ fwrite(tot_CD,"results/cases_with_tot_CD.csv",na="NA")
 
 ```
 
+
+## Comparing tot_reliability & complete_tb
+```{r}
+# Combinaciones únicas en cada tabla
+keys <- c("areacode", "metierl4", "year", "quarter")
+missing_comb <- tot_reliability %>%
+  distinct(across(all_of(keys))) %>%
+  anti_join(complete_tb %>% distinct(across(all_of(keys))), by = keys)
+#missing_comb
+
+complete_keys <- complete_tb %>%
+  distinct(across(all_of(keys))) %>%
+  mutate(complete = "yes")
+
+tot_reliability2 <- tot_reliability %>%
+  left_join(complete_keys, by = keys) %>%
+  mutate(complete = if_else(is.na(complete), "no", complete))
+
+```
+
+## Merge bpue
+```{r}
+# Merge bpue
+tot_reliability3 <- tot_reliability2 %>% 
+  left_join(bpue2_area_CD %>% 
+              select(species, areacode, metierl4, bpue, lwr, upr))
+
+
+
+
+tot_reliability3 <- bpue2_area_CD %>%
+  left_join(tot_reliability2 %>% 
+              select(species, ecoregion, metierl4, model, year, reliability_rmse, tot_mean, tot_lwr, tot_upr, fishing_effort, monitoring_coverage, overall_reliability),
+            by = c("species", "ecoregion", "metierl4", "model", "year"))
+
+
+```
+
+
+## Plot the results
+```{r}
+source("lib/CD_plotting.R")
+```
