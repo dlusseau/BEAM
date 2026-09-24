@@ -50,6 +50,7 @@ bpues_estimates$RMSE <- NA
 # Remove NAs in BPUE estimates & 0 in obs3 DaS
 bpues_estimates <- bpues_estimates[!is.na(bpue), ]
 bpues_estimates <- bpues_estimates[model != "none", ]
+bpues_estimates <- bpues_estimates[model != "only one", ]
 
 # Reduce the size removing NAs in totalbycatch
 # AM 15/10: changed to use data.table syntax. We should probably avoid spaces in var names...
