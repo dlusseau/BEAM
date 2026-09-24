@@ -414,16 +414,9 @@ tot_reliability2 <- tot_reliability %>%
 # Merge bpue
 tot_reliability3 <- tot_reliability2 %>% 
   left_join(bpue2_area_CD %>% 
-              select(species, areacode, metierl4, bpue, lwr, upr))
-
-
-
-
-tot_reliability3 <- bpue2_area_CD %>%
-  left_join(tot_reliability2 %>% 
-              select(species, ecoregion, metierl4, model, year, reliability_rmse, tot_mean, tot_lwr, tot_upr, fishing_effort, monitoring_coverage, overall_reliability),
-            by = c("species", "ecoregion", "metierl4", "model", "year"))
-
+              select(species, areacode, metierl4, bpue, bpue_lwr = lwr, bpue_upr = upr),
+            by = c("species", "areacode", "metierl4")) 
+fwrite(tot_reliability3, file = "results/tot_bpue_reliability_CD.csv")
 
 ```
 
