@@ -86,7 +86,7 @@ registerDoSNOW(cl)
 ###############################################################################################################
 
 ```{r get data, eval=FALSE}
-all1 <- beam_get_raw_data("data/all1.csv", years = years, force_download = FALSE)
+all1 <- beam_get_raw_data("data/all1.csv", years = years, force_download = TRUE)
 obs1 <- beam_get_raw_data("data/obs1.csv", years = years, force_download = FALSE)
 bycatch1 <- beam_get_raw_data("data/bycatch1.csv", years = years, force_download = FALSE)
 ```
@@ -145,16 +145,9 @@ source("lib/clean_data.R")
 ```
 
 we then generate the list of species from curated lists of species x ecoregion for ICES areas and the Mediterranean sea.it creates soecies_info.csv in the results folder which list species with their taxon and the ecoregion in which they are considered.  
-we then also create obs3 which sums DaS by ecoregion, ices area, country, year, metier level 4, metier level 5, vessellength_group, sampling protocol, and monitoring method. we create bycatch3 by summing the number of individuals by the same combination of variables plus species.  
-we then add to obs3 the number of individuals observed bycaught from bycatch3, expanding obs3 for the relevant ecoregion x species  
-this also tidies up species names as well, deal with a few exceptions with extra spaces and add the variable taxa to obs3  
-obs3 is saved in data folder and available in the workspace  
 
 ```{r merge bycatch and monitoring, eval=FALSE}
 source("lib/generate_the_list.R")
-
-
-
 
 ```
 
@@ -172,6 +165,7 @@ eco_m4_spec <- unique(obs3[, .(ecoregion, metierl4, species)])
 bpue1 <- calc_bpue(eco_m4_spec,
                    cols = c("ecoregion", "metierl4", "species"),
                    dat = obs3[taxon_bycatch_monitor_ok==TRUE],
+                   years=years,
                   include.weights = TRUE)
 fwrite(bpue1, file = "data/bpue1.csv", sep = ";",na="NA")
 
@@ -190,8 +184,8 @@ fwrite(bpue1, file = "data/bpue1.csv", sep = ";",na="NA")
 
 #### we want you to think about it for this step, so we kept it manual
 
-obs3_area <- subset(obs3,(ecoregion=="baltic sea") &
-                       (taxon=="mammals"))
+#obs3_area <- subset(obs3,(ecoregion=="baltic sea") &
+#                       (taxon=="mammals"))
 
 obs3_area <- subset(obs3,(ecoregion=="baltic sea") &
                        (species =="pusa hispida" | species =="phocoena phocoena"))
@@ -203,9 +197,10 @@ bpue1_area <- calc_bpue(needle = area_m4_spec,
                         cols = c("ecoregion", "areacode", "metierl4", "species"),
                         dat = obs3_area[taxon_bycatch_monitor_ok==TRUE])
 
-#fwrite(bpue1_area, file = "data/bpue1_area.csv", sep = ";",na="NA")
+fwrite(bpue1_area, file = "data/bpue1_area.csv", sep = ";",na="NA")
 
 ################################################################################
+
 bpue2_area <- annotate_bpue(bpue1_area, cols = c("ecoregion", "areacode", "metierl4"))
 
 #fwrite(bpue2_area, file = "data/bpue2_area.csv", sep = ";",na="NA")
