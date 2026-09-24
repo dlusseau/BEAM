@@ -110,3 +110,15 @@ fish <-
   labs(caption = "Note that x-axis is on a logarithmic scale") +
   theme(plot.caption = element_text(face = "italic"))
 fish
+
+# Save the results
+ggsave(filename = "results/figures/tot_bycatch_mammals_certains.png", plot = mammals,
+       width = 12, height = 8, dpi = 300)
+ggsave(filename = "results/figures/tot_bycatch_turtles_certains.png", plot = turtles,
+       width = 12, height = 8, dpi = 300)
+ggsave(filename = "results/figures/tot_bycatch_elasmobranchs_certains.png", plot = elasmobranchs,
+       width = 15, height = 12, dpi = 300)
+ggsave(filename = "results/figures/tot_bycatch_seabirds_certains.png", plot = seabirds,
+       width = 12, height = 8, dpi = 300)
+ggsave(filename = "results/figures/tot_bycatch_fishs_certains.png", plot = fish,
+       width = 15, height = 12, dpi = 300)
