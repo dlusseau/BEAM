@@ -361,31 +361,31 @@ all.metier$species<-tolower(all.metier$species)
 all.metier$ecoregion<-tolower(all.metier$ecoregion)
 THEDATA<-obs3_area_CD
 
-tot_CD$complete<-"no"
-tot_CD$missing<-0
+tot_reliability$complete<-"no"
+tot_reliability$missing<-0
 
-whole.bycatch.df<-data.frame(ecoregion=tot_CD$ecoregion[!duplicated(tot_CD[,c(1,3)])],species=tot_CD$species[!duplicated(tot_CD[,c(1,3)])])
+whole.bycatch.df<-data.frame(ecoregion=tot_reliability$ecoregion[!duplicated(tot_reliability[,c(1,3)])],species=tot_reliability$species[!duplicated(tot_reliability[,c(1,3)])])
 
-tot_CD.sub<-subset(tot_CD,!is.na(tot_mean))
+tot_reliability.sub<-subset(tot_reliability,!is.na(tot_mean))
 
 for (i in 1:nrow(whole.bycatch.df)) {
   fished<-all.metier$metierL4[all.metier$ecoregion==whole.bycatch.df$ecoregion[i] &all.metier$species==whole.bycatch.df$species[i]] 
-tb<-tot_CD.sub$metierl4[tot_CD.sub$ecoregion==whole.bycatch.df$ecoregion[i] &tot_CD.sub$species==whole.bycatch.df$species[i]] 
+tb<-tot_reliability.sub$metierl4[tot_reliability.sub$ecoregion==whole.bycatch.df$ecoregion[i] &tot_reliability.sub$species==whole.bycatch.df$species[i]] 
 fished<-fished[!is.na(fished)]
 
 if (all(fished%in%tb)==TRUE) {
-tot_CD$complete[tot_CD$ecoregion==whole.bycatch.df$ecoregion[i] &tot_CD$species==whole.bycatch.df$species[i]] <-"yes"
+tot_reliability$complete[tot_reliability$ecoregion==whole.bycatch.df$ecoregion[i] &tot_reliability$species==whole.bycatch.df$species[i]] <-"yes"
 
 }
-tot_CD$missing[tot_CD$ecoregion==whole.bycatch.df$ecoregion[i] &tot_CD$species==whole.bycatch.df$species[i]] <-sum((fished%in%tb)==FALSE)
+tot_reliability$missing[tot_reliability$ecoregion==whole.bycatch.df$ecoregion[i] &tot_reliability$species==whole.bycatch.df$species[i]] <-sum((fished%in%tb)==FALSE)
 
 
 }
 
-complete_tb<-tot_CD[!is.na(tot_CD$tot_mean)&tot_CD$complete=="yes",]
+complete_tb<-tot_reliability[!is.na(tot_reliability$tot_mean)&tot_reliability$complete=="yes",]
 
-fwrite(complete_tb,"results/cases_with_complete_tot_CD.csv",na="NA")
-fwrite(tot_CD,"results/cases_with_tot_CD.csv",na="NA")
+fwrite(complete_tb,"results/cases_with_complete_tot_reliability_CD.csv",na="NA")
+fwrite(tot_reliability,"results/cases_with_tot_reliability_CD.csv",na="NA")
 
 ```
 
@@ -403,9 +403,9 @@ complete_keys <- complete_tb %>%
   distinct(across(all_of(keys))) %>%
   mutate(complete = "yes")
 
-tot_reliability2 <- tot_reliability %>%
-  left_join(complete_keys, by = keys) %>%
-  mutate(complete = if_else(is.na(complete), "no", complete))
+tot_reliability2 <- tot_reliability #%>%
+#   left_join(complete_keys, by = keys) %>%
+#   mutate(complete = if_else(is.na(complete), "no", complete))
 
 ```
 
@@ -413,8 +413,8 @@ tot_reliability2 <- tot_reliability %>%
 ```{r}
 # Merge bpue
 tot_reliability3 <- tot_reliability2 %>% 
-  left_join(bpue2_area_CD %>% 
-              select(species, areacode, metierl4, bpue, bpue_lwr = lwr, bpue_upr = upr),
+  left_join(bpues_estimates %>% 
+              select(species, areacode, metierl4, bpue, bpue_lwr = lwr, bpue_upr = upr, daysatsea = daysatsea, daysatseam = daysatseaf),
             by = c("species", "areacode", "metierl4")) 
 fwrite(tot_reliability3, file = "results/tot_bpue_reliability_CD.csv")
 
@@ -423,5 +423,6 @@ fwrite(tot_reliability3, file = "results/tot_bpue_reliability_CD.csv")
 
 ## Plot the results
 ```{r}
+# Filter out those cases were 'overall_reliability' == TRUE
 source("lib/CD_plotting.R")
 ```
