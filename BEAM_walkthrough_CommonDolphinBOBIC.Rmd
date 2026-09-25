@@ -317,7 +317,7 @@ monitoring_cutoff <- bpue2_area_CD
 monitoring_cutoff$monitoring_coverage <- monitoring_cutoff$daysatsea/monitoring_cutoff$daysatseaf
 
 tot_reliability[monitoring_cutoff,
-                on = .(ecoregion, metierl4, species),
+                on = .(ecoregion, areacode, metierl4, species),
                 monitoring_coverage := i.monitoring_coverage]
 
 tot_reliability$reliability_coverage <- tot_reliability$monitoring_coverage > 0.001
@@ -414,7 +414,7 @@ tot_reliability2 <- tot_reliability #%>%
 # Merge bpue
 tot_reliability3 <- tot_reliability2 %>% 
   left_join(bpues_estimates %>% 
-              select(species, areacode, metierl4, bpue, bpue_lwr = lwr, bpue_upr = upr, daysatsea = daysatsea, daysatseam = daysatseaf),
+              select(species, areacode, metierl4, bpue, bpue_lwr = lwr, bpue_upr = upr, daysatsea = daysatsea),
             by = c("species", "areacode", "metierl4")) 
 fwrite(tot_reliability3, file = "results/tot_bpue_reliability_CD.csv")
 
