@@ -1,31 +1,45 @@
 ---
 title: "BEAM walkthrough - grey seal, harbour seal and combined pinniped case"
 author: "WGBYC ToR C group"
-date: "2026-09-23"
+date: "2026-09-24"
 output:
-  html_document: default
-  word_document: default
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+  word_document:
+    toc: true
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  collapse = TRUE
+)
 ```
 
 # Purpose
 
-This is a small extension of the standard BEAM workflow for a pooled pinniped endpoint.
+This walkthrough adds one pooled pinniped case to the standard BEAM workflow while leaving BEAM modelling and raising unchanged.
 
-Grey seal (`halichoerus grypus`) and harbour seal (`phoca vitulina`) already exist as normal BEAM species. The combined endpoint does not: it is defined here as grey seal + harbour seal + records identified only as `phocidae` or `pinnipedia`. It therefore has to be constructed **before** `calc_bpue()` is called.
+The four fitted cases are:
 
-The custom helper only performs that upstream construction. It gives the pooled endpoint one D2 monitoring denominator per standard BEAM monitoring cell and pools the corresponding D3 incidents at the same grain. After that, the normal BEAM modelling procedure is used: `calc_bpue()` estimates BPUE, `annotate_bpue()` annotates the result, and `calc_total()` raises it using D1 fishing effort.
+- `halichoerus grypus` - grey seal;
+- `phoca vitulina` - harbour seal;
+- `grey_harbour` - grey + harbour + unresolved `phocidae`/`pinnipedia`;
+- `grey_harbour_identified` - grey + harbour only, used as a diagnostic.
 
-The pure grey and pure harbour endpoints are not altered. All life stages represented in the source data are included. Unresolved `Phocidae`/`Pinnipedia` records are included only in the combined endpoint and are also exported separately as an audit.
+The flow is deliberately simple:
 
-The modelling resolution in this case is `ecoregion x exact ICES area code x metier L4 x endpoint`. Composite area codes containing `~` are not split among areas.
+`fetch -> standard BEAM cleaning -> build pinniped cases -> calc_bpue() -> calc_total() -> compare -> plot`
 
-# 1. Standard BEAM setup
+The pooled cases are constructed before `calc_bpue()`. After that, the standard BEAM functions are used unchanged. Composite ICES area codes containing `~` are not split.
 
-Use the normal BEAM repository and libraries.
+# 1. Setup
+
+## 1.1 Packages
 
 ```{r libraries}
 library(data.table)
@@ -51,36 +65,73 @@ library(tidyr)
 library(stringr)
 library(forcats)
 library(scales)
+library(sf)
+library(rnaturalearth)
 
 setwd(this.path::this.dir())
 source("lib/beam_lib.R")
 source("lib/pinniped_case.R")
 ```
 
-```{r credentials-years}
-ices_username <- readLines("username.txt")
-ices_token <- readLines("token.txt")
+## 1.2 Controls
 
+These are the settings most likely to change between runs.
+
+```{r controls}
 years <- 2017:2025
 final_year <- max(years)
 
-# Standard BEAM cache behaviour is retained. Set TRUE when the local D1/D2/D3
-# cache should be refreshed from ICES.
+# Refresh the standard BEAM D1/D2/D3 cache when required.
 FORCE_DOWNLOAD <- FALSE
+
+# Parallel processing is optional.
+USE_PARALLEL <- TRUE
+N_CORES <- 12
+
+# Area x métier figures. The case-comparison plot uses the same combinations.
+N_STANDOUT_AREA_METIER <- 10
+SHOW_DIAGNOSTIC_CASE <- FALSE
+
+# Map choice: "top_n" or "all".
+MAP_SHOW <- "top_n"
+N_MAP_AREAS <- 10
+
+stopifnot(MAP_SHOW %in% c("top_n", "all"))
+
+# ICES primary colour palette.
+ICES_BLUE <- "#002B5F"
+ICES_GREEN <- "#649388"
+ICES_HORIZON <- "#3499CC"
+ICES_ORANGE <- "#E4612B"
+ICES_SEASHELL <- "#F4F0E8"
+
+CASE_COLOURS <- c(
+  "Grey seal" = ICES_GREEN,
+  "Harbour seal" = ICES_HORIZON,
+  "Grey + harbour (identified only; diagnostic)" = ICES_BLUE,
+  "Grey + harbour + unresolved pinnipeds" = ICES_ORANGE
+)
 ```
 
-Optional parallel backend, as in the standard walkthrough:
+Figures use the ICES primary colour palette: ICES blue, ICES green, Horizon blue, Rescue orange and Seashell white.
+
+```{r credentials}
+ices_username <- readLines("username.txt", warn = FALSE)
+ices_token <- readLines("token.txt", warn = FALSE)
+```
+
+Optional parallel backend. If you do not need it, set `USE_PARALLEL <- FALSE` above.
 
 ```{r cluster}
-detectCores()
-ncores <- 12
-cl <- makeCluster(ncores)
-registerDoSNOW(cl)
+# Optional warp speed, pun intended, for the model-fitting step.
+if (USE_PARALLEL) {
+  ncores <- min(N_CORES, parallel::detectCores())
+  cl <- parallel::makeCluster(ncores)
+  registerDoSNOW(cl)
+}
 ```
 
-# 2. Standard BEAM data fetch and cleaning
-
-Keep the existing BEAM fetching and cleaning procedure.
+# 2. Fetch and clean the standard BEAM data
 
 ```{r get-data}
 all1 <- beam_get_raw_data(
@@ -100,14 +151,12 @@ bycatch1 <- beam_get_raw_data(
   years = years,
   force_download = FORCE_DOWNLOAD
 )
-
-
 ```
 
-Retain the data corrections used by the current master BEAM walkthrough before calling `clean_data.R`. For the 2025 assessment these are the GB VL0010/GB-NIR corrections and the Portugal GNS/GTR fishing-effort correction.
+Keep the annual corrections aligned with the current BEAM master walkthrough. The block below contains the 2025 GB and Portugal corrections used for this assessment.
 
 ```{r annual-fixes}
-# Current upstream 2025 GB correction
+# GB VL0010 2025 correction.
 vl0010_2025 <- subset(
   all1,
   vesselLengthRange == "VL0010" & year == 2024 & country == "GB"
@@ -117,7 +166,7 @@ all1 <- rbind(all1, vl0010_2025)
 
 obs1$country[obs1$country == "GB-NIR"] <- "GB"
 
-# Current upstream 2025 Portugal correction
+# Portugal GNS/GTR fishing-effort correction.
 sel <- all1[
   ecoregion == "Bay of Biscay and the Iberian Coast" &
     metierL4 == "GNS" &
@@ -136,7 +185,6 @@ all1 <- rbind(
   new
 )
 
-# Case-specific audit copy; the in-memory all1 object is what clean_data.R uses.
 fwrite(
   all1,
   "data/pinniped_case_all1_postcorrection.csv",
@@ -144,6 +192,8 @@ fwrite(
   na = "NA"
 )
 ```
+
+Run the normal BEAM preparation scripts.
 
 ```{r standard-cleaning}
 source("lib/clean_data.R")
@@ -153,12 +203,9 @@ obs3_standard <- copy(obs3)
 bycatch3_standard <- copy(bycatch3)
 ```
 
-Because these scripts are sourced from the BEAM repository at run time, the pinniped case inherits the current upstream preparation rules.
+# 3. Build the pinniped cases
 
-
-# 3. Construct the pinniped endpoints
-
-The helper performs the only case-specific data preparation.
+The helper does the only case-specific data preparation: it creates pooled monitoring/bycatch inputs without double-counting the monitoring denominator.
 
 ```{r prepare-pinnipeds}
 pinniped <- prepare_pinniped_case(
@@ -177,52 +224,33 @@ all2_pinniped <- pinniped$all2
 obs3 <- obs3_pinniped
 ```
 
-The three endpoints are:
+## 3.1 Quick audit
 
-- `halichoerus grypus` - pure grey seal;
-- `phoca vitulina` - pure harbour seal;
-- `grey_harbour` - grey + harbour + `phocidae` + `pinnipedia`.
-
-The pooled D2 denominator is used once per monitoring cell; it is not summed across species.
-
-## 3.1 Review unresolved pinnipeds
-
-These animals are already included in `grey_harbour`, but the audit makes their contribution visible.
+Unresolved pinnipeds are already included in `grey_harbour`; these tables simply make them visible.
 
 ```{r unresolved}
 pinniped$unresolved_totals
 pinniped$unresolved_area_summary
 ```
 
-Detailed outputs are written to:
+The detailed audits are written to `results/pinniped_case_unclassified_*.csv`.
 
-- `results/pinniped_case_unclassified_detail.csv`
-- `results/pinniped_case_unclassified_area_summary.csv`
-- `results/pinniped_case_unclassified_totals.csv`
-
-Useful QC, here the monitoring_denominator_qc and the unmatched_pooled_bycatch should give zero rows :
+These are the rows you are looking for: the denominator/matching QC tables below should normally be empty.
 
 ```{r prep-qc}
 pinniped$count_qc
 pinniped$monitoring_denominator_qc
 pinniped$unmatched_pooled_bycatch
+pinniped$unmatched_identified_pool_bycatch
 ```
 
-# 4. Standard BEAM BPUE estimation
+# 4. Estimate BPUE with standard BEAM
 
-From here the standard BEAM modelling functions are used. The helper has only created the valid pooled input required for the endpoint.
+From here, the normal BEAM model-fitting functions are used.
 
 ```{r bpue}
-area_cols <- c(
-  "ecoregion",
-  "areacode",
-  "metierl4",
-  "species"
-)
-
-area_m4_spec <- unique(
-  obs3_pinniped[, ..area_cols]
-)
+area_cols <- c("ecoregion", "areacode", "metierl4", "species")
+area_m4_spec <- unique(obs3_pinniped[, ..area_cols])
 
 bpue1_pinniped_area <- calc_bpue(
   needle = area_m4_spec,
@@ -240,63 +268,43 @@ fwrite(
 )
 ```
 
-`areacode` is part of the grouping key, so each exact ICES area code x métier-L4 x endpoint case is passed separately to `calc_bpue()`.
+Each exact `ecoregion x areacode x métier L4 x case` combination is passed separately to `calc_bpue()`.
 
-# 5. Standard BEAM annotation
+# 5. Annotate BPUE
 
 ```{r annotation}
 bpue2_pinniped_area <- annotate_bpue(
   bpue1_pinniped_area,
   cols = c("ecoregion", "areacode", "metierl4")
 )
-```
 
-Continue to use the standard BEAM zero/NA handling for the assessment. decisions.
-
-For transparency, we add descriptive information about the data behind each returned BPUE row. This is diagnostic only.
-
-```{r bpue-diagnostics}
 bpue2_pinniped_area <- add_pinniped_diagnostics(
   bpue = bpue2_pinniped_area,
   obs3_pinniped = obs3_pinniped,
   cols = area_cols
 )
+```
 
+The standard BEAM zero/NA handling is left untouched. This compact diagnostic only describes what came back.
+
+```{r bpue-diagnostics}
 bpue2_pinniped_area[
   result_status != "BPUE estimated",
   .(
-    ecoregion,
-    areacode,
-    metierl4,
-    species,
-    observed_n,
-    monitored_days,
-    n_monitoring_cells,
-    model,
-    bpue,
-    result_status
+    ecoregion, areacode, metierl4, species,
+    observed_n, monitored_days, n_monitoring_cells,
+    model, bpue, result_status
   )
 ]
 ```
 
-This distinguishes, where the returned information permits it, cases such as:
+# 6. Raise using final-year fishing effort
 
-- `BPUE estimated`;
-- `zero observed; no BPUE model retained`;
-- `zero observed; BPUE=0 returned by BEAM`;
-- `positive bycatch; BPUE unavailable`.
-
-These labels do not feed back into `calc_bpue()` or change any estimate.
-
-# 6. Raise using final-year D1 fishing effort
-
-`clean_data.R` has already restricted `all2` to the final assessment year. For `years <- 2017:2025`, the raising effort is therefore 2025 D1 effort.
-
-```{r check-final-year}
-stopifnot(all(unique(all2_pinniped$year) == final_year))
-```
+`clean_data.R` reduces D1 to the final assessment year, so for this run the raising effort is `r final_year` fishing effort.
 
 ```{r total}
+stopifnot(all(unique(all2_pinniped$year) == final_year))
+
 tot1_pinniped_area <- calc_total(
   bpue = bpue1_pinniped_area,
   cols = area_cols,
@@ -315,20 +323,11 @@ fwrite(
 )
 ```
 
-# 7. Final results and diagnostics
-
-Join the standard BEAM outputs and retain the observed-data diagnostics.
+# 7. Final results
 
 ```{r final-results}
 total_cols <- intersect(
-  c(
-    area_cols,
-    "tot_mean",
-    "tot_lwr",
-    "tot_upr",
-    "message",
-    "fishing_effort"
-  ),
+  c(area_cols, "tot_mean", "tot_lwr", "tot_upr", "message", "fishing_effort"),
   names(tot1_pinniped_area)
 )
 
@@ -339,34 +338,39 @@ pinniped_results <- merge(
   all.x = TRUE
 )
 
-unresolved_2025 <- pinniped$unresolved_area_summary[
+unresolved_final <- pinniped$unresolved_area_summary[
   year == final_year,
-  .(unclassified_observed_2025 = sum(n_unclassified, na.rm = TRUE)),
+  .(unclassified_observed_final = sum(n_unclassified, na.rm = TRUE)),
   by = .(ecoregion, areacode, metierl4)
 ]
 
 pinniped_results[
-  unresolved_2025,
+  unresolved_final,
   on = .(ecoregion, areacode, metierl4),
-  unclassified_observed_2025 := i.unclassified_observed_2025
+  unclassified_observed_final := i.unclassified_observed_final
 ]
 
 pinniped_results[
-  is.na(unclassified_observed_2025),
-  unclassified_observed_2025 := 0
+  is.na(unclassified_observed_final),
+  unclassified_observed_final := 0
 ]
 
-# The unresolved count contributes only to the pooled endpoint.
 pinniped_results[
   species != "grey_harbour",
-  unclassified_observed_2025 := NA_real_
+  unclassified_observed_final := NA_real_
 ]
 
-pinniped_results[, endpoint := fcase(
+pinniped_results[, case_label := fcase(
   species == "halichoerus grypus", "Grey seal",
   species == "phoca vitulina", "Harbour seal",
+  species == "grey_harbour_identified", "Grey + harbour (identified only; diagnostic)",
   species == "grey_harbour", "Grey + harbour + unresolved pinnipeds",
   default = species
+)]
+
+pinniped_results[, case_role := fcase(
+  species == "grey_harbour_identified", "diagnostic",
+  default = "reporting"
 )]
 
 pinniped_results <- add_pinniped_total_status(pinniped_results)
@@ -374,117 +378,344 @@ pinniped_results <- add_pinniped_total_status(pinniped_results)
 setcolorder(
   pinniped_results,
   c(
-    "endpoint",
-    "species",
-    "ecoregion",
-    "areacode",
-    "metierl4",
+    "case_label", "case_role", "species", "ecoregion", "areacode", "metierl4",
     setdiff(
       names(pinniped_results),
-      c("endpoint", "species", "ecoregion", "areacode", "metierl4")
+      c("case_label", "case_role", "species", "ecoregion", "areacode", "metierl4")
     )
   )
 )
 
 fwrite(
   pinniped_results,
-  "results/pinniped_case_area_results_2025.csv",
+  sprintf("results/pinniped_case_area_results_%s.csv", final_year),
   sep = ";",
   na = "NA"
 )
 ```
 
-A compact diagnostic view of cases without a raised estimate is:
+Rows without a raised estimate can be reviewed here:
 
 ```{r final-diagnostics}
 pinniped_results[
   total_status != "raised estimate available",
   .(
-    endpoint,
-    ecoregion,
-    areacode,
-    metierl4,
-    observed_n,
-    monitored_days,
-    model,
-    bpue,
-    result_status,
-    total_status,
-    message
+    case_label, ecoregion, areacode, metierl4,
+    observed_n, monitored_days, model, bpue,
+    result_status, total_status, message
   )
 ]
 ```
 
-The diagnostic columns describe the returned BEAM result; they do not change the original model or raising workflow.
+# 8. Compare combined and species-specific estimates
 
-# 8. Visualise raised estimates
+The main comparison is at `ICES area x métier L4`.
 
-The two plots below use only cases where BEAM returned a raised estimate and its uncertainty interval. The three endpoints are shown together for direct comparison. Within each area x métier row, the positions are intentionally offset slightly on the y-axis.
+A missing grey or harbour estimate is treated as zero only when that case has zero observed animals in the stratum. Positive observed bycatch with no raised estimate stays `NA`.
 
-`CLOSE_TO_ZERO` defines the split between the overview plot and the dedicated plot with lower total estimates. It is a presentation threshold only to better review the results; it does not affect any BPUE or raised estimate. Currently it is advisable to have this threshold quite high to sort out cases where the differences makes a big difference.
+The key quantities are:
 
-```{r raised-estimate-plots}
-CLOSE_TO_ZERO <- 150
+- `raised_difference` = full combined - (grey + harbour);
+- `percent_increase` = `raised_difference / (grey + harbour) x 100`;
+- `pooling_effect` = identified-only pooled - (grey + harbour);
+- `unresolved_increment` = full combined - identified-only pooled.
 
-plot_data <- pinniped_results %>%
+The percentage is undefined when the grey + harbour denominator is zero.
+
+```{r combined-comparison}
+# One comparison table to bind the cases together.
+case_extract <- function(dat, species_name, prefix) {
+  dat %>%
+    filter(species == species_name) %>%
+    select(
+      ecoregion, areacode, metierl4,
+      observed_n, tot_mean, tot_lwr, tot_upr, total_status
+    ) %>%
+    rename_with(
+      ~ paste0(prefix, "_", .x),
+      c(observed_n, tot_mean, tot_lwr, tot_upr, total_status)
+    )
+}
+
+combined_full <- case_extract(pinniped_results, "grey_harbour", "combined") %>%
+  filter(!is.na(combined_tot_mean))
+
+grey_case <- case_extract(pinniped_results, "halichoerus grypus", "grey")
+harbour_case <- case_extract(pinniped_results, "phoca vitulina", "harbour")
+identified_pool <- case_extract(
+  pinniped_results,
+  "grey_harbour_identified",
+  "identified_pool"
+)
+
+comparison_area_metier <- combined_full %>%
+  left_join(grey_case, by = c("ecoregion", "areacode", "metierl4")) %>%
+  left_join(harbour_case, by = c("ecoregion", "areacode", "metierl4")) %>%
+  left_join(identified_pool, by = c("ecoregion", "areacode", "metierl4")) %>%
+  mutate(
+    grey_zero_assumed = is.na(grey_tot_mean) & coalesce(grey_observed_n, 0) == 0,
+    harbour_zero_assumed = is.na(harbour_tot_mean) & coalesce(harbour_observed_n, 0) == 0,
+    identified_pool_zero_assumed =
+      is.na(identified_pool_tot_mean) & coalesce(identified_pool_observed_n, 0) == 0,
+
+    grey_for_comparison = case_when(
+      !is.na(grey_tot_mean) ~ grey_tot_mean,
+      grey_zero_assumed ~ 0,
+      TRUE ~ NA_real_
+    ),
+    harbour_for_comparison = case_when(
+      !is.na(harbour_tot_mean) ~ harbour_tot_mean,
+      harbour_zero_assumed ~ 0,
+      TRUE ~ NA_real_
+    ),
+    identified_pool_for_comparison = case_when(
+      !is.na(identified_pool_tot_mean) ~ identified_pool_tot_mean,
+      identified_pool_zero_assumed ~ 0,
+      TRUE ~ NA_real_
+    ),
+
+    species_sum_raised = grey_for_comparison + harbour_for_comparison,
+    raised_difference = combined_tot_mean - species_sum_raised,
+    percent_increase = case_when(
+      is.finite(raised_difference) & species_sum_raised > 0 ~
+        100 * raised_difference / species_sum_raised,
+      TRUE ~ NA_real_
+    ),
+    pooling_effect = identified_pool_for_comparison - species_sum_raised,
+    unresolved_increment = combined_tot_mean - identified_pool_for_comparison,
+    comparison_available = is.finite(raised_difference)
+  ) %>%
+  arrange(desc(raised_difference))
+
+fwrite(
+  as.data.table(comparison_area_metier),
+  "results/pinniped_case_raised_difference_area_metier.csv",
+  sep = ";",
+  na = "NA"
+)
+
+comparison_area_metier %>%
+  select(
+    ecoregion, areacode, metierl4,
+    species_sum_raised, combined_tot_mean,
+    raised_difference, percent_increase,
+    pooling_effect, unresolved_increment,
+    comparison_available
+  )
+```
+
+Summaries retain métier, area, and grand-total views. Percentage increases are calculated from the corresponding summed estimates; percentages themselves are not summed.
+
+```{r comparison-summaries}
+safe_sum <- function(x) {
+  if (all(is.na(x))) NA_real_ else sum(x, na.rm = TRUE)
+}
+
+add_percent_increase <- function(x) {
+  x %>%
+    mutate(
+      percent_increase = case_when(
+        is.finite(raised_difference) & species_sum_raised > 0 ~
+          100 * raised_difference / species_sum_raised,
+        TRUE ~ NA_real_
+      )
+    )
+}
+
+comparison_by_metier <- comparison_area_metier %>%
+  group_by(metierl4) %>%
+  summarise(
+    species_sum_raised = safe_sum(species_sum_raised),
+    combined_raised = safe_sum(ifelse(comparison_available, combined_tot_mean, NA_real_)),
+    combined_raised_all = safe_sum(combined_tot_mean),
+    raised_difference = safe_sum(raised_difference),
+    pooling_effect = safe_sum(pooling_effect),
+    unresolved_increment = safe_sum(unresolved_increment),
+    n_area_metier = n(),
+    n_comparable = sum(comparison_available),
+    .groups = "drop"
+  ) %>%
+  add_percent_increase() %>%
+  arrange(desc(raised_difference))
+
+comparison_by_area <- comparison_area_metier %>%
+  group_by(ecoregion, areacode) %>%
+  summarise(
+    species_sum_raised = safe_sum(species_sum_raised),
+    combined_raised = safe_sum(ifelse(comparison_available, combined_tot_mean, NA_real_)),
+    combined_raised_all = safe_sum(combined_tot_mean),
+    raised_difference = safe_sum(raised_difference),
+    pooling_effect = safe_sum(pooling_effect),
+    unresolved_increment = safe_sum(unresolved_increment),
+    n_metiers = n(),
+    n_comparable = sum(comparison_available),
+    comparison_coverage = n_comparable / n_metiers,
+    .groups = "drop"
+  ) %>%
+  add_percent_increase() %>%
+  arrange(desc(raised_difference))
+
+comparison_total <- comparison_area_metier %>%
+  summarise(
+    species_sum_raised = safe_sum(species_sum_raised),
+    combined_raised = safe_sum(ifelse(comparison_available, combined_tot_mean, NA_real_)),
+    combined_raised_all = safe_sum(combined_tot_mean),
+    raised_difference = safe_sum(raised_difference),
+    pooling_effect = safe_sum(pooling_effect),
+    unresolved_increment = safe_sum(unresolved_increment),
+    n_area_metier = n(),
+    n_comparable = sum(comparison_available),
+    comparison_coverage = n_comparable / n_area_metier
+  ) %>%
+  add_percent_increase()
+
+comparison_by_metier
+comparison_by_area
+comparison_total
+
+fwrite(
+  as.data.table(comparison_by_metier),
+  "results/pinniped_case_raised_difference_sum_over_areas_by_metier.csv",
+  sep = ";", na = "NA"
+)
+
+fwrite(
+  as.data.table(comparison_by_area),
+  "results/pinniped_case_raised_difference_sum_over_metiers_by_area.csv",
+  sep = ";", na = "NA"
+)
+
+fwrite(
+  as.data.table(comparison_total),
+  "results/pinniped_case_raised_difference_total.csv",
+  sep = ";", na = "NA"
+)
+```
+
+# 9. Visualise the comparison
+
+The figures are driven by the current results rather than hard-coded areas or ecoregions.
+
+## 9.1 Largest area x métier differences
+
+```{r standout-area-metier}
+standout_area_metier <- comparison_area_metier %>%
+  filter(comparison_available, raised_difference > 0) %>%
+  slice_max(
+    order_by = raised_difference,
+    n = N_STANDOUT_AREA_METIER,
+    with_ties = FALSE
+  ) %>%
+  mutate(
+    area_metier = paste(areacode, toupper(metierl4), sep = " | "),
+    area_metier = forcats::fct_reorder(area_metier, raised_difference)
+  )
+
+if (nrow(standout_area_metier) > 0) {
+  p_pinniped_case_standout_area_metier <- ggplot(
+    standout_area_metier,
+    aes(x = raised_difference, y = area_metier, fill = raised_difference)
+  ) +
+    geom_col(show.legend = FALSE) +
+    scale_fill_gradientn(
+      colours = c(ICES_SEASHELL, ICES_HORIZON, ICES_BLUE)
+    ) +
+    scale_x_continuous(
+      labels = scales::label_number(accuracy = 1, big.mark = " "),
+      expand = expansion(mult = c(0, 0.05))
+    ) +
+    labs(
+      x = "Raised difference: combined - (grey + harbour)",
+      y = "ICES area | métier level 4",
+      title = "Largest area x métier differences",
+      subtitle = paste0("Top ", nrow(standout_area_metier), " positive differences")
+    ) +
+    theme_bw() +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(),
+      axis.text.y = element_text(size = 8),
+      plot.title = element_text(face = "bold", colour = ICES_BLUE)
+    )
+
+  print(p_pinniped_case_standout_area_metier)
+
+  ggsave(
+    "results/pinniped_case_standout_raised_difference_area_metier.png",
+    p_pinniped_case_standout_area_metier,
+    width = 10,
+    height = max(6, nrow(standout_area_metier) * 0.30 + 2),
+    dpi = 300
+  )
+}
+```
+
+## 9.2 Raised estimates across cases
+
+This uses the **same area x métier combinations as the ranked plot above**, so the two figures answer complementary questions: how large is the combined-minus-species difference, and what do the underlying raised estimates and uncertainty intervals look like?
+
+By default only the three reporting cases are shown. Set `SHOW_DIAGNOSTIC_CASE <- TRUE` in the controls to add the identified-only pooled diagnostic. Cases without a BEAM raised estimate are not given an artificial interval and therefore do not appear.
+
+```{r case-comparison-area-metier}
+selected_area_metier <- standout_area_metier %>%
+  distinct(ecoregion, areacode, metierl4)
+
+case_plot_data <- pinniped_results %>%
   filter(
     total_status == "raised estimate available",
-    !is.na(tot_mean),
-    !is.na(tot_lwr),
-    !is.na(tot_upr)
+    is.finite(tot_mean),
+    is.finite(tot_lwr),
+    is.finite(tot_upr),
+    SHOW_DIAGNOSTIC_CASE | case_role == "reporting"
+  ) %>%
+  semi_join(
+    selected_area_metier,
+    by = c("ecoregion", "areacode", "metierl4")
   ) %>%
   mutate(
     areacode = as.character(areacode),
     metierl4 = toupper(as.character(metierl4)),
     area_metier = paste(areacode, metierl4, sep = " | "),
-    endpoint = factor(
-      endpoint,
-      levels = c(
-        "Grey seal",
-        "Harbour seal",
-        "Grey + harbour + unresolved pinnipeds"
-      )
-    ),
-    # Raised bycatch cannot be negative; clamp only for plotting if a
-    # numerical lower interval happens to fall below zero for some reason.
     tot_lwr_plot = pmax(tot_lwr, 0)
   )
 
-# Give each endpoint a fixed vertical offset within an area x métier row.
-# This avoids overlapping points/intervals while keeping all endpoints in
-# one comparison panel.
-add_endpoint_positions <- function(dat) {
-  endpoint_offsets <- c(
-    "Grey seal" = -0.22,
-    "Harbour seal" = 0,
-    "Grey + harbour + unresolved pinnipeds" = 0.22
-  )
+case_levels <- c(
+  "Grey seal",
+  "Harbour seal",
+  "Grey + harbour (identified only; diagnostic)",
+  "Grey + harbour + unresolved pinnipeds"
+)
 
-  area_order <- dat %>%
-    group_by(area_metier) %>%
-    summarise(order_value = max(tot_mean, na.rm = TRUE), .groups = "drop") %>%
-    arrange(order_value) %>%
+if (!SHOW_DIAGNOSTIC_CASE) {
+  case_levels <- case_levels[
+    case_levels != "Grey + harbour (identified only; diagnostic)"
+  ]
+}
+
+if (nrow(case_plot_data) > 0) {
+  # Match the row order used in the ranked-difference figure.
+  area_levels <- standout_area_metier %>%
+    arrange(raised_difference) %>%
+    transmute(area_metier = paste(areacode, toupper(metierl4), sep = " | ")) %>%
+    distinct() %>%
     pull(area_metier)
 
-  dat %>%
+  # Small vertical offsets keep case intervals readable within each row.
+  case_offsets <- seq(-0.24, 0.24, length.out = length(case_levels))
+  names(case_offsets) <- case_levels
+
+  case_plot_data <- case_plot_data %>%
     mutate(
-      area_metier = factor(area_metier, levels = area_order),
+      case_label = factor(case_label, levels = case_levels),
+      area_metier = factor(area_metier, levels = area_levels),
       y_base = as.numeric(area_metier),
-      y_position = y_base + endpoint_offsets[as.character(endpoint)]
-    )
-}
+      y_position = y_base + case_offsets[as.character(case_label)]
+    ) %>%
+    filter(!is.na(case_label), !is.na(y_position))
 
-# Plot 1: estimates that are not close to zero --------------------------
-plot_data_main <- plot_data %>%
-  filter(tot_mean > CLOSE_TO_ZERO) %>%
-  add_endpoint_positions()
-
-if (nrow(plot_data_main) > 0) {
-  main_levels <- levels(plot_data_main$area_metier)
-
-  p_pinniped_case_main <- ggplot(
-    plot_data_main,
-    aes(colour = endpoint)
+  p_pinniped_case_case_comparison <- ggplot(
+    case_plot_data,
+    aes(colour = case_label)
   ) +
     geom_segment(
       aes(
@@ -493,123 +724,432 @@ if (nrow(plot_data_main) > 0) {
         y = y_position,
         yend = y_position
       ),
-      linewidth = 0.55
+      linewidth = 0.6
     ) +
     geom_point(
       aes(x = tot_mean, y = y_position),
-      size = 2.3
+      size = 2.4
     ) +
-    scale_y_continuous(
-      breaks = seq_along(main_levels),
-      labels = main_levels,
-      expand = expansion(add = 0.6)
-    ) +
-    labs(
-      x = "Predicted total bycatch (individuals)",
-      y = "ICES area | métier level 4",
-      title = "Raised pinniped bycatch estimates",
-      subtitle = paste0(
-        "Mean estimate > ", CLOSE_TO_ZERO
-      ),
-      colour = "Endpoint"
-    ) +
-    theme_bw() +
-    theme(
-      legend.position = "bottom",
-      panel.grid.minor = element_blank(),
-      panel.grid.major.y = element_blank(),
-      axis.text.y = element_text(size = 8)
-    )
-
-  print(p_pinniped_case_main)
-
-  ggsave(
-    filename = "results/pinniped_case_raised_estimates_high.png",
-    plot = p_pinniped_case_main,
-    width = 11,
-    height = max(6, length(main_levels) * 0.28 + 2),
-    dpi = 300
-  )
-}
-
-# Plot 2: estimates close to zero --------------------------------------
-# This plot uses its own linear x-axis, so small estimates can be compared
-# without being compressed by the larger estimates in Plot 1.
-plot_data_near_zero <- plot_data %>%
-  filter(tot_mean <= CLOSE_TO_ZERO) %>%
-  add_endpoint_positions()
-
-if (nrow(plot_data_near_zero) > 0) {
-  near_zero_levels <- levels(plot_data_near_zero$area_metier)
-
-  p_pinniped_case_near_zero <- ggplot(
-    plot_data_near_zero,
-    aes(colour = endpoint)
-  ) +
-    geom_segment(
-      aes(
-        x = tot_lwr_plot,
-        xend = tot_upr,
-        y = y_position,
-        yend = y_position
-      ),
-      linewidth = 0.55
-    ) +
-    geom_point(
-      aes(x = tot_mean, y = y_position),
-      size = 2.3
-    ) +
-    scale_x_continuous(
-      labels = scales::label_number(accuracy = 0.1, big.mark = " "),
+    scale_x_sqrt(
+      labels = scales::label_number(accuracy = 1, big.mark = " "),
       expand = expansion(mult = c(0, 0.05))
     ) +
     scale_y_continuous(
-      breaks = seq_along(near_zero_levels),
-      labels = near_zero_levels,
+      breaks = seq_along(area_levels),
+      labels = area_levels,
       expand = expansion(add = 0.6)
     ) +
+    scale_colour_manual(
+      values = CASE_COLOURS,
+      drop = FALSE
+    ) +
     labs(
-      x = "Predicted total bycatch (individuals)",
+      x = "Raised bycatch estimate (individuals; square-root scale)",
       y = "ICES area | métier level 4",
-      title = "Raised pinniped bycatch estimates",
+      title = "Raised estimates across pinniped cases",
       subtitle = paste0(
-        "Mean estimate <= ", CLOSE_TO_ZERO
+      "The" , length(area_levels),
+        " higest ranked area x métier combinations; "
       ),
-      colour = "Endpoint"
+      colour = "Case"
     ) +
     theme_bw() +
     theme(
       legend.position = "bottom",
       panel.grid.minor = element_blank(),
       panel.grid.major.y = element_blank(),
-      axis.text.y = element_text(size = 8)
+      axis.text.y = element_text(size = 8),
+      plot.title = element_text(face = "bold", colour = ICES_BLUE)
     )
 
-  print(p_pinniped_case_near_zero)
+  print(p_pinniped_case_case_comparison)
 
   ggsave(
-    filename = "results/pinniped_case_raised_estimates_low.png",
-    plot = p_pinniped_case_near_zero,
+    "results/pinniped_case_raised_estimate_comparison_area_metier.png",
+    p_pinniped_case_case_comparison,
     width = 11,
-    height = max(6, length(near_zero_levels) * 0.28 + 2),
-    dpi = 300
+    height = max(6, length(area_levels) * 0.34 + 2.4),
+    dpi = 300,
+    limitsize = FALSE
   )
 }
 ```
 
-The plot files are written to:
+# 10. Maps
 
-- `results/pinniped_case_raised_estimates_main.png`
-- `results/pinniped_case_raised_estimates_near_zero.png`
+Two maps use the **same areas**:
 
-# 9. Finish
+1. absolute increase: `combined - (grey + harbour)`;
+2. percentage increase relative to `grey + harbour`.
 
-Restore the standard BEAM object if other taxa will be analysed in the same session.
+Area selection is controlled at the top of the walkthrough. `MAP_SHOW <- "top_n"` maps the `N_MAP_AREAS` largest positive absolute differences; `MAP_SHOW <- "all"` maps all positive differences. The percentage map does not re-rank the areas, so the two maps remain directly comparable.
+
+The official ICES GIS area layer is queried directly because BEAM `areacode` can represent different ICES hierarchy levels. Each estimate is mapped at the finest level represented by its own code; larger-area estimates are not distributed into smaller polygons. If a future run contains ICES statistical-rectangle codes, the official ICES statistical-rectangle layer is added automatically.
+
+The basemap and data fills use the ICES primary palette: a pale Horizon-blue sea, Seashell-white land, ICES-blue structure, and ICES-derived continuous scales for the estimates.
+
+## 10.1 Prepare ICES geometry and select areas
+
+```{r map-data}
+normalise_ices_code <- function(x) {
+  x <- tolower(trimws(as.character(x)))
+  x[x == ""] <- NA_character_
+  gsub("\\s+", "", x)
+}
+
+join_ices_code <- function(...) {
+  parts <- list(...)
+  n <- max(vapply(parts, length, integer(1)))
+  parts <- lapply(parts, rep_len, length.out = n)
+
+  vapply(seq_len(n), function(i) {
+    z <- vapply(parts, `[`, character(1), i)
+    z <- z[!is.na(z) & z != ""]
+    if (length(z) == 0) NA_character_ else paste(z, collapse = ".")
+  }, character(1))
+}
+
+read_ices_layer <- function(cache, url, fields) {
+  refresh <- !file.exists(cache)
+
+  if (!refresh) {
+    cached <- try(sf::st_read(cache, quiet = TRUE), silent = TRUE)
+    refresh <- inherits(cached, "try-error") || !all(fields %in% names(cached))
+  }
+
+  if (refresh) {
+    message("Refreshing ICES spatial cache: ", basename(cache))
+    response <- httr::GET(
+      url,
+      query = list(
+        where = "1=1",
+        outFields = paste(fields, collapse = ","),
+        returnGeometry = "true",
+        outSR = "4326",
+        f = "geojson"
+      )
+    )
+    httr::stop_for_status(response)
+    writeBin(httr::content(response, as = "raw"), cache)
+  }
+
+  x <- sf::st_read(cache, quiet = TRUE) %>% sf::st_make_valid()
+  missing_fields <- setdiff(fields, names(x))
+  if (length(missing_fields) > 0) {
+    stop("ICES layer is missing: ", paste(missing_fields, collapse = ", "))
+  }
+  x
+}
+
+make_lookup <- function(x, key, level, priority) {
+  x %>%
+    transmute(
+      map_key = .data[[key]],
+      spatial_level = level,
+      match_priority = priority
+    ) %>%
+    filter(!is.na(map_key), map_key != "") %>%
+    group_by(map_key, spatial_level, match_priority) %>%
+    summarise(geometry = sf::st_union(geometry), .groups = "drop") %>%
+    sf::st_as_sf()
+}
+
+# Candidate areas are ranked by the absolute increase.
+map_area_candidates <- comparison_by_area %>%
+  mutate(
+    areacode = as.character(areacode),
+    map_key = normalise_ices_code(areacode)
+  ) %>%
+  filter(
+    is.finite(raised_difference),
+    raised_difference > 0,
+    !is.na(map_key)
+  ) %>%
+  arrange(desc(raised_difference))
+
+if (nrow(map_area_candidates) == 0) {
+  stop("No areas have a finite positive raised_difference.")
+}
+
+# Official ICES area hierarchy.
+dir.create("data", recursive = TRUE, showWarnings = FALSE)
+dir.create("results", recursive = TRUE, showWarnings = FALSE)
+
+ices_area_fields <- c(
+  "Major_FA", "SubArea", "Division", "SubDivisio", "Unit",
+  "Area_Full", "Area_27"
+)
+
+ices_areas_sf <- read_ices_layer(
+  cache = "data/pinniped_case_ices_areas.geojson",
+  url = paste0(
+    "https://gis.ices.dk/gis/rest/services/",
+    "ICES_reference_layers/ICES_Areas/MapServer/0/query"
+  ),
+  fields = ices_area_fields
+)
+
+ices_areas_base <- ices_areas_sf %>%
+  mutate(
+    major_part = normalise_ices_code(Major_FA),
+    subarea_part = normalise_ices_code(SubArea),
+    division_part = normalise_ices_code(Division),
+    subdivision_part = normalise_ices_code(SubDivisio),
+    unit_part = normalise_ices_code(Unit),
+    key_subarea = join_ices_code(major_part, subarea_part),
+    key_division = join_ices_code(major_part, subarea_part, division_part),
+    key_subdivision = join_ices_code(
+      major_part, subarea_part, division_part, subdivision_part
+    ),
+    key_unit = join_ices_code(
+      major_part, subarea_part, division_part, subdivision_part, unit_part
+    ),
+    key_area_full = normalise_ices_code(Area_Full),
+    key_area_27 = {
+      x <- normalise_ices_code(Area_27)
+      ifelse(
+        is.na(x),
+        NA_character_,
+        ifelse(grepl("^27\\.", x), x, paste0("27.", x))
+      )
+    }
+  )
+
+# Prefer an explicit hierarchy match over the generic fallback fields.
+spatial_lookup_sf <- bind_rows(
+  make_lookup(ices_areas_base, "key_unit", "ICES unit", 1),
+  make_lookup(ices_areas_base, "key_subdivision", "ICES subdivision", 2),
+  make_lookup(ices_areas_base, "key_division", "ICES division", 3),
+  make_lookup(ices_areas_base, "key_subarea", "ICES subarea", 4),
+  make_lookup(ices_areas_base, "key_area_full", "ICES full area", 5),
+  make_lookup(ices_areas_base, "key_area_27", "ICES Area_27", 6)
+)
+
+# Add ICES statistical rectangles only when such codes occur in the results.
+has_statrec_codes <- any(grepl("^[0-9]{2}[a-z][0-9]$", map_area_candidates$map_key))
+
+if (has_statrec_codes) {
+  ices_statrec_sf <- read_ices_layer(
+    cache = "data/pinniped_case_ices_statrec.geojson",
+    url = paste0(
+      "https://gis.ices.dk/gis/rest/services/",
+      "ICES_reference_layers/ICES_Statrec_Eco/MapServer/0/query"
+    ),
+    fields = c("ICESNAME", "Ecoregion")
+  ) %>%
+    mutate(statrec_key = normalise_ices_code(ICESNAME))
+
+  spatial_lookup_sf <- bind_rows(
+    make_lookup(ices_statrec_sf, "statrec_key", "ICES statistical rectangle", 0),
+    spatial_lookup_sf
+  )
+}
+
+# First identify what can be mapped, then apply the top-N choice. This avoids
+# asking for 10 areas and silently receiving fewer because one did not join.
+mappable_keys <- spatial_lookup_sf %>%
+  sf::st_drop_geometry() %>%
+  distinct(map_key)
+
+# Wrong Trousers check: these area codes did not find the expected spatial fit.
+unmatched_map_areacodes <- map_area_candidates %>%
+  anti_join(mappable_keys, by = "map_key")
+
+fwrite(
+  as.data.table(unmatched_map_areacodes),
+  "results/pinniped_case_unmatched_map_areacodes.csv",
+  sep = ";",
+  na = "NA"
+)
+
+map_area_candidates <- map_area_candidates %>%
+  semi_join(mappable_keys, by = "map_key")
+
+if (nrow(map_area_candidates) == 0) {
+  stop("None of the positive area differences could be matched to ICES geometry.")
+}
+
+map_areas_to_show <- if (MAP_SHOW == "top_n") {
+  map_area_candidates %>% slice_head(n = N_MAP_AREAS)
+} else {
+  map_area_candidates
+}
+
+# Join the selected estimates to geometry and keep the best hierarchy match.
+map_results_sf <- spatial_lookup_sf %>%
+  inner_join(map_areas_to_show, by = "map_key") %>%
+  group_by(ecoregion, areacode, map_key) %>%
+  filter(match_priority == min(match_priority)) %>%
+  ungroup()
+
+mapped_area_levels <- map_results_sf %>%
+  sf::st_drop_geometry() %>%
+  select(
+    ecoregion, areacode, spatial_level,
+    species_sum_raised, combined_raised,
+    raised_difference, percent_increase,
+    comparison_coverage
+  ) %>%
+  distinct() %>%
+  arrange(desc(raised_difference))
+
+fwrite(
+  as.data.table(mapped_area_levels),
+  "results/pinniped_case_mapped_area_levels.csv",
+  sep = ";",
+  na = "NA"
+)
+
+mapped_area_levels
+
+# Background and map extent.
+land_sf <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+map_labels_sf <- sf::st_point_on_surface(map_results_sf)
+map_bbox <- sf::st_bbox(map_results_sf)
+
+x_pad <- max(1, as.numeric(map_bbox["xmax"] - map_bbox["xmin"]) * 0.12)
+y_pad <- max(1, as.numeric(map_bbox["ymax"] - map_bbox["ymin"]) * 0.12)
+
+map_xlim <- c(map_bbox["xmin"] - x_pad, map_bbox["xmax"] + x_pad)
+map_ylim <- c(map_bbox["ymin"] - y_pad, map_bbox["ymax"] + y_pad)
+
+map_subtitle <- if (MAP_SHOW == "top_n") {
+  paste0("Top ", nrow(map_results_sf), " mappable areas ranked by absolute increase")
+} else {
+  "All mappable areas with a positive absolute increase"
+}
+```
+
+If `unmatched_map_areacodes` contains rows, they remain in the numerical comparison tables but are not shown on the map.
+
+## 10.2 Absolute increase map
+
+```{r map-absolute}
+make_pinniped_map <- function(fill_var, title, legend_title, percent = FALSE, caption = NULL) {
+  p <- ggplot() +
+    theme_bw() +
+    theme(
+      panel.background = element_rect(
+        fill = scales::alpha(ICES_HORIZON, 0.14),
+        colour = NA
+      ),
+      panel.grid.major = element_line(colour = "white", linewidth = 0.25),
+      panel.grid.minor = element_blank()
+    ) +
+    geom_sf(
+      data = ices_areas_sf,
+      fill = NA,
+      colour = scales::alpha(ICES_GREEN, 0.55),
+      linewidth = 0.15
+    ) +
+    geom_sf(
+      data = map_results_sf,
+      aes(fill = .data[[fill_var]]),
+      colour = ICES_BLUE,
+      linewidth = 0.55
+    ) +
+    geom_sf(
+      data = land_sf,
+      fill = ICES_SEASHELL,
+      colour = scales::alpha(ICES_BLUE, 0.55),
+      linewidth = 0.25
+    ) +
+    geom_sf_text(
+      data = map_labels_sf,
+      aes(label = areacode),
+      size = 3,
+      colour = ICES_BLUE,
+      check_overlap = TRUE
+    ) +
+    coord_sf(xlim = map_xlim, ylim = map_ylim, expand = FALSE) +
+    labs(
+      title = title,
+      subtitle = map_subtitle,
+      caption = caption,
+      x = NULL,
+      y = NULL
+    ) +
+    theme(
+      legend.position = "right",
+      plot.title = element_text(face = "bold", colour = ICES_BLUE),
+      plot.subtitle = element_text(colour = "grey30"),
+      plot.caption = element_text(hjust = 1)
+    )
+
+  if (percent) {
+    p + scale_fill_gradient(
+      low = ICES_BLUE,
+      high = ICES_ORANGE,
+      na.value = "grey90",
+      name = legend_title,
+      labels = scales::label_number(accuracy = 1, suffix = "%")
+    )
+  } else {
+    p + scale_fill_gradient(
+      low = ICES_BLUE,
+      high = ICES_ORANGE,
+      na.value = "grey90",
+      name = legend_title,
+      labels = scales::label_number(accuracy = 1, big.mark = " ")
+    )
+  }
+}
+
+p_pinniped_case_raised_difference_map <- make_pinniped_map(
+  fill_var = "raised_difference",
+  title = "Increase in the combined pinniped estimate",
+  legend_title = "Combined -\n(grey + harbour)"
+)
+
+print(p_pinniped_case_raised_difference_map)
+
+ggsave(
+  "results/pinniped_case_raised_difference_map.png",
+  p_pinniped_case_raised_difference_map,
+  width = 10,
+  height = 8,
+  dpi = 300
+)
+```
+
+## 10.3 Percentage increase map
+
+This uses exactly the same selected areas as the absolute map. If the grey + harbour baseline is zero or non-finite, the percentage is undefined and is stored as `NA` rather than `Inf`/`NaN`.
+
+```{r map-percentage}
+if (any(is.finite(map_results_sf$percent_increase))) {
+  p_pinniped_case_percent_increase_map <- make_pinniped_map(
+    fill_var = "percent_increase",
+    title = "Percentage increase in the combined pinniped estimate",
+    legend_title = "Increase over\ngrey + harbour",
+    percent = TRUE,
+    caption = "Percentage is undefined where the grey + harbour baseline is zero or non-finite."
+  )
+
+  print(p_pinniped_case_percent_increase_map)
+
+  ggsave(
+    "results/pinniped_case_percent_increase_map.png",
+    p_pinniped_case_percent_increase_map,
+    width = 10,
+    height = 8,
+    dpi = 300
+  )
+} else {
+  message("Percentage map skipped: no selected area has a finite percentage increase.")
+}
+```
+
+# 11. Finish
+
+Restore the standard BEAM object if the same R session will continue with other taxa.
 
 ```{r restore}
 obs3 <- obs3_standard
+
+if (USE_PARALLEL && exists("cl")) {
+  parallel::stopCluster(cl)
+}
 ```
 
-```{r stop-cluster}
-stopCluster(cl)
-```
+Normal BEAM service is restored; the pinniped detour is complete.
