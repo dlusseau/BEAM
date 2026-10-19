@@ -45,13 +45,13 @@ table.print$tbfinal.upr<-round(table.print$tbfinal.upr,1)
 table.print$taxa<-factor(table.print$taxa,levels=c("mammals","seabirds","turtles","elasmobranchs","fish"))
 
 colnames(table.print)<-c("Ecoregion", "metier L4", "Taxon", "Species", "Common name", 
-							"# individuals 2023", "monitoring effort (DaS) 2023", 
-							"Fishing effort (DaS) 2023","# individuals 2017-2023", "monitoring effort (DaS) 2017-2023", 
+							"# individuals 2025", "monitoring effort (DaS) 2025", 
+							"Fishing effort (DaS) 2025","# individuals 2017-2025", "monitoring effort (DaS) 2017-2025", 
 							"BPUE model", "BPUE", "lower", "upper",
-							"total bycatch 2023", "TB lower", "TB upper", "interannual", "key variability in BPUE")
+							"total bycatch 2025", "TB lower", "TB upper", "interannual", "key variability in BPUE")
 							
-table.print$"# individuals 2017-2023"<-round(table.print$"# individuals 2017-2023",0)
-table.print$"# individuals 2023"<-round(table.print$"# individuals 2023",0)
+table.print$"# individuals 2017-2025"<-round(table.print$"# individuals 2017-2025",0)
+table.print$"# individuals 2025"<-round(table.print$"# individuals 2025",0)
 
 table.print$interannual[table.print$interannual=="none apparent"]<-"none"
 table.print$interannual[table.print$interannual!="none"]<-"present"
@@ -63,7 +63,7 @@ table.print$upper<-round(table.print$upper,4)
 all3<-aggregate(daysatseaf~ecoregion+metierl4,data=all2,function(x) sum(x,na.rm=TRUE))
 
 temp<-merge(table.print,all3,by.x=c("Ecoregion","metier L4"),by.y=c("ecoregion","metierl4"),all.x=TRUE)
-table.print$"Fishing effort (DaS) 2024"<-round(temp$daysatseaf,0)
+table.print$"Fishing effort (DaS) 2025"<-round(temp$daysatseaf,0)
 
 temp<-merge(table.print,bpue2,by.x=c("Ecoregion","metier L4","Species"),by.y=c("ecoregion","metierl4","species"),all.x=TRUE)
 table.print$"Monitoring coverage"<-round(temp$monitoring_coverage,5)
@@ -123,13 +123,13 @@ CTB_sum$upper<-round(CTB_sum$upper,1)
 CTB_sum$taxa<-factor(CTB_sum$taxa,levels=c("mammals","seabirds","turtles","elasmobranchs","fish"))
 
 
-colnames(CTB_sum)<-c("Ecoregion", "species","# individuals 2023","monitoring effort (DaS) 2023",
-"# individuals 2017-2023","monitoring effort (DaS) 2017-2023", 
-"Fishing effort (DaS) 2023","total bycatch 2023", "TB lower", "TB upper","Taxon", "# metiers","Common name")
+colnames(CTB_sum)<-c("Ecoregion", "species","# individuals 2025","monitoring effort (DaS) 2025",
+"# individuals 2017-2025","monitoring effort (DaS) 2017-2025", 
+"Fishing effort (DaS) 2025","total bycatch 2025", "TB lower", "TB upper","Taxon", "# metiers","Common name")
 
-CTB_sum<-CTB_sum[,c("Ecoregion","Taxon","Common name","# individuals 2023","monitoring effort (DaS) 2023",
-					"# individuals 2017-2023","monitoring effort (DaS) 2017-2023", 
-					"Fishing effort (DaS) 2023","total bycatch 2023", "TB lower", "TB upper")]
+CTB_sum<-CTB_sum[,c("Ecoregion","Taxon","Common name","# individuals 2025","monitoring effort (DaS) 2025",
+					"# individuals 2017-2025","monitoring effort (DaS) 2017-2025", 
+					"Fishing effort (DaS) 2025","total bycatch 2025", "TB lower", "TB upper")]
 
 
 
@@ -156,10 +156,10 @@ skate", "great white shark", "sand tiger shark", "smalltooth sand tiger shark",
 
 priority3<-paste(priority3,collapse="|")
 
-priorty1_tb<-table.print[table.print$Species%in%priority1&!is.na(table.print$"total bycatch 2023"),]
-priorty2_tb<-table.print[table.print$Taxon=="turtles"&!is.na(table.print$"total bycatch 2023"),]
+priorty1_tb<-table.print[table.print$Species%in%priority1&!is.na(table.print$"total bycatch 2025"),]
+priorty2_tb<-table.print[table.print$Taxon=="turtles"&!is.na(table.print$"total bycatch 2025"),]
 priorty3_tb<-table.print[grep(priority3,tolower(table.print$"Common name")),]
-priorty3_tb<-priorty3_tb[!is.na(priorty3_tb$"total bycatch 2023"),]
+priorty3_tb<-priorty3_tb[!is.na(priorty3_tb$"total bycatch 2025"),]
 
 priority_list<-rbind(priorty1_tb,priorty2_tb,priorty3_tb)
 priority_list<-priority_list[,-c(9,16)]

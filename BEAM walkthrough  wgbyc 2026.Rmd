@@ -86,7 +86,7 @@ registerDoSNOW(cl)
 ###############################################################################################################
 
 ```{r get data, eval=FALSE}
-all1 <- beam_get_raw_data("data/all1.csv", years = years, force_download = TRUE)
+all1 <- beam_get_raw_data("data/all1.csv", years = years, force_download = FALSE)
 obs1 <- beam_get_raw_data("data/obs1.csv", years = years, force_download = FALSE)
 bycatch1 <- beam_get_raw_data("data/bycatch1.csv", years = years, force_download = FALSE)
 ```
